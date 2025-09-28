@@ -60,6 +60,10 @@ BehaviorVelocityPlannerNode::BehaviorVelocityPlannerNode(const rclcpp::NodeOptio
   using std::placeholders::_1;
   using std::placeholders::_2;
 
+  // Initialize polling subscriber for predicted objects (agnocast-enabled)
+  sub_predicted_objects_ = AUTOWARE_CREATE_POLLING_SUBSCRIBER(
+    autoware_perception_msgs::msg::PredictedObjects, "~/input/dynamic_objects", 1);
+
   // Trigger Subscriber
   trigger_sub_path_with_lane_id_ =
     this->create_subscription<autoware_internal_planning_msgs::msg::PathWithLaneId>(
