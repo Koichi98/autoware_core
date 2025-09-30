@@ -80,6 +80,11 @@ MotionVelocityPlannerNode::MotionVelocityPlannerNode(const rclcpp::NodeOptions &
     "~/service/unload_plugin",
     std::bind(&MotionVelocityPlannerNode::on_unload_plugin, this, _1, _2));
 
+  // Initialize pointcloud subscriber
+  sub_no_ground_pointcloud_ = AUTOWARE_CREATE_POLLING_SUBSCRIBER(
+    sensor_msgs::msg::PointCloud2, "~/input/no_ground_pointcloud",
+    autoware_utils_rclcpp::single_depth_sensor_qos());
+
   // Publishers
   trajectory_pub_ =
     this->create_publisher<autoware_planning_msgs::msg::Trajectory>("~/output/trajectory", 1);
@@ -171,7 +176,7 @@ bool MotionVelocityPlannerNode::update_planner_data(
     planner_data_->process_predicted_objects(*predicted_objects_ptr);
   processing_times["update_planner_data.pred_obj"] = sw.toc(true);
 
-  const auto no_ground_pointcloud_ptr = sub_no_ground_pointcloud_.take_data();
+  const auto no_ground_pointcloud_ptr = sub_no_ground_pointcloud_->take_data();
   if (check_with_log(
         no_ground_pointcloud_ptr, "Waiting for pointcloud",
         required_subscriptions.no_ground_pointcloud)) {
@@ -219,7 +224,7 @@ bool MotionVelocityPlannerNode::update_planner_data(
 
 std::optional<pcl::PointCloud<pcl::PointXYZ>>
 MotionVelocityPlannerNode::process_no_ground_pointcloud(
-  const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+  const AUTOWARE_MESSAGE_SHARED_PTR(const sensor_msgs::msg::PointCloud2) msg)
 {
   geometry_msgs::msg::TransformStamped transform;
   const bool is_pcl_time_valid = (this->get_clock()->now() - rclcpp::Time(msg->header.stamp)) <
