@@ -136,7 +136,7 @@ void BehaviorVelocityPlannerNode::onParam()
   planner_data_.velocity_smoother_->setWheelBase(planner_data_.vehicle_info_.wheel_base_m);
 }
 
-void BehaviorVelocityPlannerNode::processNoGroundPointCloud(
+bool BehaviorVelocityPlannerNode::processNoGroundPointCloud(
   const AUTOWARE_MESSAGE_SHARED_PTR(const sensor_msgs::msg::PointCloud2) msg)
 {
   geometry_msgs::msg::TransformStamped transform;
