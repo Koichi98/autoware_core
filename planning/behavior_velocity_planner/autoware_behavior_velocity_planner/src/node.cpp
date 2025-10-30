@@ -64,6 +64,9 @@ BehaviorVelocityPlannerNode::BehaviorVelocityPlannerNode(const rclcpp::NodeOptio
   trigger_sub_path_with_lane_id_ =
     this->create_subscription<autoware_internal_planning_msgs::msg::PathWithLaneId>(
       "~/input/path_with_lane_id", 1, std::bind(&BehaviorVelocityPlannerNode::onTrigger, this, _1));
+  sub_no_ground_pointcloud_ = AUTOWARE_CREATE_POLLING_SUBSCRIBER(
+      sensor_msgs::msg::PointCloud2, "~/input/no_ground_pointcloud",
+      autoware_utils_rclcpp::single_depth_sensor_qos());
 
   srv_load_plugin_ = create_service<LoadPlugin>(
     "~/service/load_plugin", std::bind(&BehaviorVelocityPlannerNode::onLoadPlugin, this, _1, _2));
@@ -133,8 +136,8 @@ void BehaviorVelocityPlannerNode::onParam()
   planner_data_.velocity_smoother_->setWheelBase(planner_data_.vehicle_info_.wheel_base_m);
 }
 
-bool BehaviorVelocityPlannerNode::processNoGroundPointCloud(
-  const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+void BehaviorVelocityPlannerNode::processNoGroundPointCloud(
+  const AUTOWARE_MESSAGE_SHARED_PTR(const sensor_msgs::msg::PointCloud2) msg)
 {
   geometry_msgs::msg::TransformStamped transform;
   try {
@@ -234,6 +237,7 @@ bool BehaviorVelocityPlannerNode::processData(rclcpp::Clock clock)
     RCLCPP_INFO_THROTTLE(get_logger(), clock, logger_throttle_interval, "%s", msg.c_str());
   };
 
+  // Version for non-pointer subscribers
   const auto & getData = [&logData](
                            auto & dest, auto & sub, const std::string & data_type = "",
                            const bool is_required = true) {
@@ -242,6 +246,23 @@ bool BehaviorVelocityPlannerNode::processData(rclcpp::Clock clock)
     }
 
     const auto temp = sub.take_data();
+    if (temp) {
+      dest = temp;
+      return true;
+    }
+    if (!data_type.empty()) logData(data_type);
+    return false;
+  };
+
+  // Version for pointer subscribers
+  const auto & getDataPtr = [&logData](
+                              auto & dest, auto & sub, const std::string & data_type = "",
+                              const bool is_required = true) {
+    if (!is_required) {
+      return true;
+    }
+
+    const auto temp = sub->take_data();
     if (temp) {
       dest = temp;
       return true;
@@ -266,8 +287,8 @@ bool BehaviorVelocityPlannerNode::processData(rclcpp::Clock clock)
     processOdometry(odometry);
   }
 
-  sensor_msgs::msg::PointCloud2::ConstSharedPtr no_ground_pointcloud;
-  is_ready &= getData(
+  AUTOWARE_MESSAGE_SHARED_PTR(const sensor_msgs::msg::PointCloud2) no_ground_pointcloud{nullptr};
+  is_ready &= getDataPtr(
     no_ground_pointcloud, sub_no_ground_pointcloud_, "pointcloud",
     required_subscriptions.no_ground_pointcloud);
 
