@@ -56,7 +56,7 @@ using OnSetParametersCallbackType =
 ///            shared_ptr without throwing.
 /// @invariant `use_agnocast() == false` iff `get_rclcpp_node()`   returns a valid
 ///            shared_ptr without throwing.
-class Node
+class Node : public std::enable_shared_from_this<Node>
 {
 public:
   using SharedPtr = std::shared_ptr<Node>;
