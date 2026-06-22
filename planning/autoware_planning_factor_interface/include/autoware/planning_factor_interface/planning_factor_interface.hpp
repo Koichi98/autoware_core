@@ -27,6 +27,7 @@
 #include <autoware_planning_msgs/msg/trajectory_point.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 
+#include <functional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -44,16 +45,24 @@ using geometry_msgs::msg::Pose;
 class PlanningFactorInterface
 {
 public:
+  // Templated on the node type so it also accepts non-rclcpp::Node nodes that expose the same
+  // create_publisher()/get_clock() API (e.g. autoware::agnocast_wrapper::Node). The created
+  // publisher (whose concrete type differs per node type) is type-erased into publish_fn_ so the
+  // rest of the class stays node-type agnostic. Only the constructor is a template; the class itself
+  // is not, which keeps the existing explicit-instantiation (extern template) machinery for add<>()
+  // unchanged.
+  template <typename NodeT>
   PlanningFactorInterface(
-    rclcpp::Node * node, const std::string & name, bool enable_console_output = false,
+    NodeT * node, const std::string & name, bool enable_console_output = false,
     int throttle_duration_ms = 1000)
   : name_{name},
-    pub_factors_{
-      node->create_publisher<PlanningFactorArray>("/planning/planning_factors/" + name, 1)},
     clock_{node->get_clock()},
     enable_console_output_{enable_console_output},
     throttle_duration_ms_{throttle_duration_ms}
   {
+    auto publisher =
+      node->template create_publisher<PlanningFactorArray>("/planning/planning_factors/" + name, 1);
+    publish_fn_ = [publisher](const PlanningFactorArray & msg) { publisher->publish(msg); };
   }
 
   /**
@@ -207,7 +216,7 @@ public:
     msg.header.stamp = clock_->now();
     msg.factors = std::move(factors_);
 
-    pub_factors_->publish(msg);
+    publish_fn_(msg);
 
     if (enable_console_output_ && !msg.factors.empty()) {
       print_factors_to_console(msg);
@@ -240,7 +249,8 @@ private:
 
   std::string name_;
 
-  rclcpp::Publisher<PlanningFactorArray>::SharedPtr pub_factors_;
+  // Type-erased publish closure that owns the underlying publisher (rclcpp or agnocast wrapper).
+  std::function<void(const PlanningFactorArray &)> publish_fn_;
 
   rclcpp::Clock::SharedPtr clock_;
 
