@@ -50,6 +50,9 @@
 #define AUTOWARE_SERVICE_REQUEST_PTR(ServiceT) \
   autoware::agnocast_wrapper::message_ptr<     \
     typename ServiceT::Request, autoware::agnocast_wrapper::OwnershipType::Shared>
+#define AUTOWARE_SERVICE_REQUEST_CONST_PTR(ServiceT) \
+  autoware::agnocast_wrapper::message_ptr<           \
+    const typename ServiceT::Request, autoware::agnocast_wrapper::OwnershipType::Shared>
 #define AUTOWARE_SERVICE_RESPONSE_PTR(ServiceT) \
   autoware::agnocast_wrapper::message_ptr<      \
     typename ServiceT::Response, autoware::agnocast_wrapper::OwnershipType::Shared>
@@ -1055,9 +1058,9 @@ public:
   {
     static_assert(
       std::is_invocable_v<
-        std::decay_t<Func>, AUTOWARE_SERVICE_REQUEST_PTR(ServiceT) &&,
+        std::decay_t<Func>, AUTOWARE_SERVICE_REQUEST_CONST_PTR(ServiceT) &&,
         AUTOWARE_SERVICE_RESPONSE_PTR(ServiceT) &&>,
-      "Callback should be invocable with AUTOWARE_SERVICE_REQUEST_PTR and "
+      "Callback should be invocable with AUTOWARE_SERVICE_REQUEST_CONST_PTR and "
       "AUTOWARE_SERVICE_RESPONSE_PTR (const&, &&, or by-value)");
 
     srv_ = agnocast::create_service<ServiceT>(
@@ -1066,7 +1069,9 @@ public:
         agnocast::ipc_shared_ptr<typename ServiceT::Request> && agnocast_request,
         agnocast::ipc_shared_ptr<typename ServiceT::Response> && agnocast_response) {
         callback(
-          AUTOWARE_SERVICE_REQUEST_PTR(ServiceT){std::move(agnocast_request)},
+          AUTOWARE_SERVICE_REQUEST_CONST_PTR(ServiceT){
+            agnocast::ipc_shared_ptr<const typename ServiceT::Request>(
+              std::move(agnocast_request))},
           AUTOWARE_SERVICE_RESPONSE_PTR(ServiceT){std::move(agnocast_response)});
       },
       qos, group);
@@ -1086,9 +1091,9 @@ public:
   {
     static_assert(
       std::is_invocable_v<
-        std::decay_t<Func>, AUTOWARE_SERVICE_REQUEST_PTR(ServiceT) &&,
+        std::decay_t<Func>, AUTOWARE_SERVICE_REQUEST_CONST_PTR(ServiceT) &&,
         AUTOWARE_SERVICE_RESPONSE_PTR(ServiceT) &&>,
-      "Callback should be invocable with AUTOWARE_SERVICE_REQUEST_PTR and "
+      "Callback should be invocable with AUTOWARE_SERVICE_REQUEST_CONST_PTR and "
       "AUTOWARE_SERVICE_RESPONSE_PTR (const&, &&, or by-value)");
 
     srv_ = node->create_service<ServiceT>(
@@ -1097,7 +1102,8 @@ public:
         std::shared_ptr<typename ServiceT::Request> && ros2_request,
         std::shared_ptr<typename ServiceT::Response> && ros2_response) {
         callback(
-          AUTOWARE_SERVICE_REQUEST_PTR(ServiceT){std::move(ros2_request)},
+          AUTOWARE_SERVICE_REQUEST_CONST_PTR(ServiceT){
+            std::shared_ptr<const typename ServiceT::Request>(std::move(ros2_request))},
           AUTOWARE_SERVICE_RESPONSE_PTR(ServiceT){std::move(ros2_response)});
       },
 #if RCLCPP_VERSION_MAJOR >= 28
@@ -1271,6 +1277,8 @@ inline void set_period(const rclcpp::TimerBase::SharedPtr & timer, std::chrono::
 // For subscription (read-only message)
 #define AUTOWARE_MESSAGE_CONST_SHARED_PTR(MessageT) std::shared_ptr<const MessageT>
 #define AUTOWARE_SERVICE_REQUEST_PTR(ServiceT) std::shared_ptr<typename ServiceT::Request>
+#define AUTOWARE_SERVICE_REQUEST_CONST_PTR(ServiceT) \
+  std::shared_ptr<const typename ServiceT::Request>
 #define AUTOWARE_SERVICE_RESPONSE_PTR(ServiceT) std::shared_ptr<typename ServiceT::Response>
 #define AUTOWARE_SUBSCRIPTION_PTR(MessageT) typename rclcpp::Subscription<MessageT>::SharedPtr
 #define AUTOWARE_PUBLISHER_PTR(MessageT) typename rclcpp::Publisher<MessageT>::SharedPtr
