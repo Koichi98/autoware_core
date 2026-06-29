@@ -43,8 +43,22 @@ public:
     double jerk_filter_ds;
   };
 
+  // Defined inline (template) so it instantiates for any node type (see SmootherBase).
+  template <typename NodeT>
   explicit JerkFilteredSmoother(
-    rclcpp::Node & node, const std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper);
+    NodeT & node, const std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper)
+  : SmootherBase(node, time_keeper)
+  {
+    auto & p = smoother_param_;
+    p.jerk_weight = node.template declare_parameter<double>("jerk_weight");
+    p.over_v_weight = node.template declare_parameter<double>("over_v_weight");
+    p.over_a_weight = node.template declare_parameter<double>("over_a_weight");
+    p.over_j_weight = node.template declare_parameter<double>("over_j_weight");
+    p.jerk_filter_ds = node.template declare_parameter<double>("jerk_filter_ds");
+
+    // ProxQP construction lives in the .cpp (its header pollutes TUs that include this one).
+    initQpInterface();
+  }
 
   bool apply(
     const double initial_vel, const double initial_acc, const TrajectoryPoints & input,
@@ -60,6 +74,10 @@ public:
   Param getParam() const;
 
 private:
+  // Constructs qp_interface_ (ProxQP); defined in the .cpp so proxsuite headers don't leak into
+  // every TU that includes this header (they clash with osqp etc.).
+  void initQpInterface();
+
   Param smoother_param_;
   std::shared_ptr<autoware::qp_interface::QPInterface> qp_interface_;
   rclcpp::Logger logger_{rclcpp::get_logger("smoother").get_child("jerk_filtered_smoother")};

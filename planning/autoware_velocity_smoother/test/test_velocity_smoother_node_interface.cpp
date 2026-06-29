@@ -61,7 +61,7 @@ std::shared_ptr<VelocitySmootherNode> generateNode()
 
 void publishMandatoryTopics(
   std::shared_ptr<PlanningInterfaceTestManager> test_manager,
-  rclcpp::Node::SharedPtr test_target_node)
+  std::shared_ptr<VelocitySmootherNode> test_target_node)
 {
   // publish necessary topics from test_manager
   test_manager->publishInput(

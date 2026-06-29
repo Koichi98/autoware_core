@@ -36,7 +36,10 @@ namespace autoware::velocity_smoother
 {
 VelocitySmootherNode::VelocitySmootherNode(const rclcpp::NodeOptions & node_options)
 : Node("velocity_smoother", node_options),
-  diagnostics_interface_(std::make_unique<DiagnosticsInterface>(this, "velocity_smoother"))
+  diagnostics_interface_(
+    std::make_unique<
+      autoware_utils_diagnostics::BasicDiagnosticsInterface<autoware::agnocast_wrapper::Node>>(
+      this, "velocity_smoother"))
 {
   using std::placeholders::_1;
 
@@ -92,19 +95,24 @@ VelocitySmootherNode::VelocitySmootherNode(const rclcpp::NodeOptions & node_opti
   VelocityLimit max_vel_msg{};
   max_vel_msg.stamp = this->now();
   max_vel_msg.max_velocity = static_cast<float>(node_param_.max_velocity);
-  pub_velocity_limit_->publish(max_vel_msg);
+  { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_velocity_limit_); *_m = max_vel_msg; pub_velocity_limit_->publish(std::move(_m)); }
 
   clock_ = get_clock();
 
-  logger_configure_ = std::make_unique<autoware_utils_logging::LoggerLevelConfigure>(this);
-  published_time_publisher_ = std::make_unique<autoware_utils_debug::PublishedTimePublisher>(this);
+  logger_configure_ = std::make_unique<
+    autoware_utils_logging::BasicLoggerLevelConfigure<autoware::agnocast_wrapper::Node>>(this);
+  published_time_publisher_ = std::make_unique<
+    autoware_utils_debug::BasicPublishedTimePublisher<autoware::agnocast_wrapper::Node>>(this);
 }
 
 void VelocitySmootherNode::setupSmoother(const double wheelbase)
 {
+  // Pass the smoothers the agnocast_wrapper::Node base reference (not the derived node type) so the
+  // templated smoother ctors resolve to the base instantiation explicitly provided by the smoothers.
+  autoware::agnocast_wrapper::Node & node = *this;
   switch (node_param_.algorithm_type) {
     case AlgorithmType::JERK_FILTERED: {
-      smoother_ = std::make_shared<JerkFilteredSmoother>(*this, time_keeper_);
+      smoother_ = std::make_shared<JerkFilteredSmoother>(node, time_keeper_);
 
       // Set Publisher for jerk filtered algorithm
       pub_forward_filtered_trajectory_ =
@@ -118,15 +126,15 @@ void VelocitySmootherNode::setupSmoother(const double wheelbase)
       break;
     }
     case AlgorithmType::L2: {
-      smoother_ = std::make_shared<L2PseudoJerkSmoother>(*this, time_keeper_);
+      smoother_ = std::make_shared<L2PseudoJerkSmoother>(node, time_keeper_);
       break;
     }
     case AlgorithmType::LINF: {
-      smoother_ = std::make_shared<LinfPseudoJerkSmoother>(*this, time_keeper_);
+      smoother_ = std::make_shared<LinfPseudoJerkSmoother>(node, time_keeper_);
       break;
     }
     case AlgorithmType::ANALYTICAL: {
-      smoother_ = std::make_shared<AnalyticalJerkConstrainedSmoother>(*this, time_keeper_);
+      smoother_ = std::make_shared<AnalyticalJerkConstrainedSmoother>(node, time_keeper_);
       break;
     }
     default:
@@ -322,7 +330,7 @@ void VelocitySmootherNode::publishTrajectory(const TrajectoryPoints & trajectory
 {
   Trajectory publishing_trajectory = autoware::motion_utils::convertToTrajectory(trajectory);
   publishing_trajectory.header = base_traj_raw_ptr_->header;
-  pub_trajectory_->publish(publishing_trajectory);
+  { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_trajectory_); *_m = publishing_trajectory; pub_trajectory_->publish(std::move(_m)); }
   published_time_publisher_->publish_if_subscribed(
     pub_trajectory_, publishing_trajectory.header.stamp);
 }
@@ -342,7 +350,7 @@ void VelocitySmootherNode::calcExternalVelocityLimit()
   // on the first time, apply directly
   if (prev_output_.empty() || !current_closest_point_from_prev_output_) {
     external_velocity_limit_.velocity = external_velocity_limit_ptr_->max_velocity;
-    pub_velocity_limit_->publish(*external_velocity_limit_ptr_);
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_velocity_limit_); *_m = *external_velocity_limit_ptr_; pub_velocity_limit_->publish(std::move(_m)); }
     return;
   }
 
@@ -428,7 +436,7 @@ void VelocitySmootherNode::calcExternalVelocityLimit()
   }
 
   external_velocity_limit_.velocity = external_velocity_limit_ptr_->max_velocity;
-  pub_velocity_limit_->publish(*external_velocity_limit_ptr_);
+  { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_velocity_limit_); *_m = *external_velocity_limit_ptr_; pub_velocity_limit_->publish(std::move(_m)); }
 
   return;
 }
@@ -449,7 +457,8 @@ bool VelocitySmootherNode::checkData() const
   return true;
 }
 
-void VelocitySmootherNode::onCurrentTrajectory(const Trajectory::ConstSharedPtr msg)
+void VelocitySmootherNode::onCurrentTrajectory(
+  const AUTOWARE_MESSAGE_CONST_SHARED_PTR(Trajectory) & msg)
 {
   autoware_utils_debug::ScopedTimeTrack st(__func__, *time_keeper_);
 
@@ -460,10 +469,11 @@ void VelocitySmootherNode::onCurrentTrajectory(const Trajectory::ConstSharedPtr 
   base_traj_raw_ptr_ = msg;
 
   // receive data
-  current_odometry_ptr_ = sub_current_odometry_.take_data();
-  current_acceleration_ptr_ = sub_current_acceleration_.take_data();
-  external_velocity_limit_ptr_ = sub_external_velocity_limit_.take_data();
-  const auto operation_mode_ptr = sub_operation_mode_.take_data();
+  current_odometry_ptr_ = sub_current_odometry_->take_data();
+  current_acceleration_ptr_ = sub_current_acceleration_->take_data();
+  external_velocity_limit_ptr_ =
+    sub_external_velocity_limit_->take_data(/*allow_same_message=*/false);
+  const auto operation_mode_ptr = sub_operation_mode_->take_data();
   if (operation_mode_ptr) {
     operation_mode_ = *operation_mode_ptr;
   }
@@ -583,7 +593,7 @@ TrajectoryPoints VelocitySmootherNode::calcTrajectoryVelocity(
   if (publish_debug_trajs_) {
     auto tmp = traj_extracted;
     if (is_reverse_) flipVelocity(tmp);
-    pub_trajectory_raw_->publish(toTrajectoryMsg(tmp));
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_trajectory_raw_); *_m = toTrajectoryMsg(tmp); pub_trajectory_raw_->publish(std::move(_m)); }
   }
 
   // Apply external velocity limit
@@ -599,7 +609,7 @@ TrajectoryPoints VelocitySmootherNode::calcTrajectoryVelocity(
   if (publish_debug_trajs_) {
     auto tmp = traj_extracted;
     if (is_reverse_) flipVelocity(tmp);
-    pub_trajectory_vel_lim_->publish(toTrajectoryMsg(traj_extracted));
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_trajectory_vel_lim_); *_m = toTrajectoryMsg(traj_extracted); pub_trajectory_vel_lim_->publish(std::move(_m)); }
   }
 
   // Smoothing velocity
@@ -704,17 +714,17 @@ bool VelocitySmootherNode::smoothVelocity(
     {
       auto tmp = traj_lateral_acc_filtered;
       if (is_reverse_) flipVelocity(tmp);
-      pub_trajectory_latacc_filtered_->publish(toTrajectoryMsg(tmp));
+      { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_trajectory_latacc_filtered_); *_m = toTrajectoryMsg(tmp); pub_trajectory_latacc_filtered_->publish(std::move(_m)); }
     }
     {
       auto tmp = traj_resampled;
       if (is_reverse_) flipVelocity(tmp);
-      pub_trajectory_resampled_->publish(toTrajectoryMsg(tmp));
+      { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_trajectory_resampled_); *_m = toTrajectoryMsg(tmp); pub_trajectory_resampled_->publish(std::move(_m)); }
     }
     {
       auto tmp = traj_steering_rate_limited;
       if (is_reverse_) flipVelocity(tmp);
-      pub_trajectory_steering_rate_limited_->publish(toTrajectoryMsg(tmp));
+      { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_trajectory_steering_rate_limited_); *_m = toTrajectoryMsg(tmp); pub_trajectory_steering_rate_limited_->publish(std::move(_m)); }
     }
 
     for (auto & debug_trajectory : debug_trajectories) {
@@ -793,7 +803,7 @@ void VelocitySmootherNode::publishStopDistance(const TrajectoryPoints & trajecto
   Float32Stamped dist_to_stopline{};
   dist_to_stopline.stamp = this->now();
   dist_to_stopline.data = static_cast<float>(std::clamp(stop_dist, -stop_dist_lim, stop_dist_lim));
-  pub_dist_to_stopline_->publish(dist_to_stopline);
+  { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_dist_to_stopline_); *_m = dist_to_stopline; pub_dist_to_stopline_->publish(std::move(_m)); }
 }
 
 std::pair<Motion, VelocitySmootherNode::InitializeType> VelocitySmootherNode::calcInitialMotion(
@@ -963,7 +973,7 @@ void VelocitySmootherNode::applyExternalVelocityLimit(TrajectoryPoints & traj) c
     const auto virtual_wall_marker = autoware::motion_utils::createStopVirtualWallMarker(
       traj.at(*inserted_index).pose, external_velocity_limit_.sender, this->now(), 0,
       base_link2front_);
-    pub_virtual_wall_->publish(virtual_wall_marker);
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_virtual_wall_); *_m = virtual_wall_marker; pub_virtual_wall_->publish(std::move(_m)); }
   }
 
   RCLCPP_DEBUG(
@@ -1004,9 +1014,9 @@ void VelocitySmootherNode::publishDebugTrajectories(
       flipVelocity(debug_trajectories_tmp.at(1));
       flipVelocity(debug_trajectories_tmp.at(2));
     }
-    pub_forward_filtered_trajectory_->publish(toTrajectoryMsg(debug_trajectories_tmp.at(0)));
-    pub_backward_filtered_trajectory_->publish(toTrajectoryMsg(debug_trajectories_tmp.at(1)));
-    pub_merged_filtered_trajectory_->publish(toTrajectoryMsg(debug_trajectories_tmp.at(2)));
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_forward_filtered_trajectory_); *_m = toTrajectoryMsg(debug_trajectories_tmp.at(0)); pub_forward_filtered_trajectory_->publish(std::move(_m)); }
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_backward_filtered_trajectory_); *_m = toTrajectoryMsg(debug_trajectories_tmp.at(1)); pub_backward_filtered_trajectory_->publish(std::move(_m)); }
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub_merged_filtered_trajectory_); *_m = toTrajectoryMsg(debug_trajectories_tmp.at(2)); pub_merged_filtered_trajectory_->publish(std::move(_m)); }
     publishClosestVelocity(
       debug_trajectories_tmp.at(2), current_odometry_ptr_->pose.pose, pub_closest_merged_velocity_);
   }
@@ -1014,14 +1024,14 @@ void VelocitySmootherNode::publishDebugTrajectories(
 
 void VelocitySmootherNode::publishClosestVelocity(
   const TrajectoryPoints & trajectory, const Pose & current_pose,
-  const rclcpp::Publisher<Float32Stamped>::SharedPtr pub) const
+  const AUTOWARE_PUBLISHER_PTR(Float32Stamped) pub) const
 {
   const auto closest_point = calcProjectedTrajectoryPoint(trajectory, current_pose);
 
   Float32Stamped vel_data{};
   vel_data.stamp = this->now();
   vel_data.data = std::max(closest_point.longitudinal_velocity_mps, static_cast<float>(0.0));
-  pub->publish(vel_data);
+  { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub); *_m = vel_data; pub->publish(std::move(_m)); }
 }
 
 void VelocitySmootherNode::publishClosestState(const TrajectoryPoints & trajectory)
@@ -1032,7 +1042,7 @@ void VelocitySmootherNode::publishClosestState(const TrajectoryPoints & trajecto
     Float32Stamped msg{};
     msg.stamp = this->now();
     msg.data = static_cast<float>(data);
-    pub->publish(msg);
+    { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(pub); *_m = msg; pub->publish(std::move(_m)); }
     return;
   };
 
@@ -1138,7 +1148,7 @@ void VelocitySmootherNode::publishStopWatchTime()
   Float64Stamped calculation_time_data{};
   calculation_time_data.stamp = this->now();
   calculation_time_data.data = stop_watch_.toc();
-  debug_calculation_time_->publish(calculation_time_data);
+  { auto _m = ALLOCATE_OUTPUT_MESSAGE_UNIQUE(debug_calculation_time_); *_m = calculation_time_data; debug_calculation_time_->publish(std::move(_m)); }
 }
 
 TrajectoryPoint VelocitySmootherNode::calcProjectedTrajectoryPoint(
