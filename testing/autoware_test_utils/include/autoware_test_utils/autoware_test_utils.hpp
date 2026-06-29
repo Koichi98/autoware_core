@@ -556,9 +556,13 @@ void setSubscriber(
  * @param data The data to publish.
  * @param repeat_count The number of times to retry publishing.
  */
-template <typename T>
+// NodeT is templated so the target node can be either an rclcpp::Node or an
+// autoware::agnocast_wrapper::Node (which is not an rclcpp::Node). Only get_node_base_interface()
+// is required of it; subscriber counting is done from the (always-rclcpp) test_node, which observes
+// the same global topic graph.
+template <typename T, typename NodeT = rclcpp::Node>
 void publishToTargetNode(
-  rclcpp::Node::SharedPtr test_node, rclcpp::Node::SharedPtr target_node, std::string topic_name,
+  rclcpp::Node::SharedPtr test_node, std::shared_ptr<NodeT> target_node, std::string topic_name,
   typename rclcpp::Publisher<T>::SharedPtr publisher, const T & data, const int repeat_count = 3)
 {
   if (topic_name.empty()) {
@@ -573,7 +577,7 @@ void publishToTargetNode(
   autoware::test_utils::setPublisher<T>(test_node, topic_name, publisher);
   publisher->publish(data);
 
-  if (target_node->count_subscribers(topic_name) == 0) {
+  if (test_node->count_subscribers(topic_name) == 0) {
     throw std::runtime_error("No subscriber for " + topic_name);
   }
   autoware::test_utils::spinSomeNodes(
