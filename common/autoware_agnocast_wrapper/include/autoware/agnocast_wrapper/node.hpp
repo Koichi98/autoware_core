@@ -242,6 +242,34 @@ public:
       options);
   }
 
+  // ===== Generic (runtime-typed) Subscription =====
+  template <typename Func>
+  GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos,
+    Func && callback, const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+  {
+    return visit_node([&](auto & n) -> GenericSubscription::SharedPtr {
+      using NodeT = std::decay_t<decltype(*n)>;
+      if constexpr (std::is_same_v<NodeT, agnocast::Node>) {
+        return std::make_shared<AgnocastGenericSubscription>(
+          n.get(), topic_name, topic_type, qos, std::forward<Func>(callback), options);
+      } else {
+        return std::make_shared<ROS2GenericSubscription>(
+          n.get(), topic_name, topic_type, qos, std::forward<Func>(callback), options);
+      }
+    });
+  }
+
+  template <typename Func>
+  GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, size_t qos_history_depth,
+    Func && callback, const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+  {
+    return create_generic_subscription(
+      topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
+      std::forward<Func>(callback), options);
+  }
+
   // ===== Polling Subscriber =====
   template <typename MessageT, template <typename> class PollingPolicy = polling_policy::Latest>
   typename PollingSubscriber<MessageT, PollingPolicy>::SharedPtr create_polling_subscriber(
@@ -694,6 +722,26 @@ public:
     return node_->create_subscription<MessageT>(
       topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), std::forward<Func>(callback),
       options);
+  }
+
+  // ===== Generic (runtime-typed) Subscription =====
+  template <typename Func>
+  rclcpp::GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos,
+    Func && callback, const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
+  {
+    return node_->create_generic_subscription(
+      topic_name, topic_type, qos, std::forward<Func>(callback), options);
+  }
+
+  template <typename Func>
+  rclcpp::GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, size_t qos_history_depth,
+    Func && callback, const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
+  {
+    return node_->create_generic_subscription(
+      topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
+      std::forward<Func>(callback), options);
   }
 
   // ===== Polling Subscriber =====

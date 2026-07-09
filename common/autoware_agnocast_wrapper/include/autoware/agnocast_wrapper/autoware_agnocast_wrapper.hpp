@@ -78,11 +78,17 @@
 #define AUTOWARE_CLIENT_SHARED_FUTURE_AND_REQUEST_ID(ServiceT) \
   typename autoware::agnocast_wrapper::Client<ServiceT>::SharedFutureAndRequestId
 #define AUTOWARE_TIMER_PTR autoware::agnocast_wrapper::Timer::SharedPtr
+#define AUTOWARE_GENERIC_SUBSCRIPTION_PTR autoware::agnocast_wrapper::GenericSubscription::SharedPtr
 
 #define AUTOWARE_CREATE_SUBSCRIPTION(message_type, topic, qos, callback, options) \
   autoware::agnocast_wrapper::create_subscription<message_type>(this, topic, qos, callback, options)
 #define AUTOWARE_CREATE_SUBSCRIPTION_ON_NODE(message_type, node, topic, qos, callback, options) \
   autoware::agnocast_wrapper::create_subscription<message_type>(node, topic, qos, callback, options)
+
+#define AUTOWARE_CREATE_GENERIC_SUBSCRIPTION(topic, topic_type, qos, callback, options) \
+  autoware::agnocast_wrapper::create_generic_subscription(this, topic, topic_type, qos, callback, options)
+#define AUTOWARE_CREATE_GENERIC_SUBSCRIPTION_ON_NODE(node, topic, topic_type, qos, callback, options) \
+  autoware::agnocast_wrapper::create_generic_subscription(node, topic, topic_type, qos, callback, options)
 
 #define AUTOWARE_CREATE_PUBLISHER2(message_type, arg1, arg2) \
   autoware::agnocast_wrapper::create_publisher<message_type>(this, arg1, arg2)
@@ -558,6 +564,80 @@ typename Subscription<MessageT>::SharedPtr create_subscription(
       node, topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
       std::forward<Func>(callback), options);
   }
+}
+
+// Generic (runtime-typed) subscription: the message type is selected at runtime via a
+// topic_type string rather than a compile-time MessageT, so unlike Subscription<MessageT>
+// this class hierarchy has no template parameter.
+class GenericSubscription
+{
+public:
+  using SharedPtr = std::shared_ptr<GenericSubscription>;
+
+  virtual ~GenericSubscription() = default;
+};
+
+class AgnocastGenericSubscription : public GenericSubscription
+{
+  agnocast::GenericSubscription::SharedPtr subscription_;
+
+public:
+  template <typename NodeT, typename Func>
+  explicit AgnocastGenericSubscription(
+    NodeT * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, Func && callback, const agnocast::SubscriptionOptions & options)
+  : subscription_(agnocast::create_generic_subscription(
+      node, topic_name, topic_type, qos, std::forward<Func>(callback), options))
+  {
+  }
+};
+
+class ROS2GenericSubscription : public GenericSubscription
+{
+  rclcpp::GenericSubscription::SharedPtr subscription_;
+
+public:
+  template <typename Func>
+  explicit ROS2GenericSubscription(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, Func && callback, const agnocast::SubscriptionOptions & options)
+  {
+    rclcpp::SubscriptionOptions ros2_options;
+    ros2_options.callback_group = options.callback_group;
+    subscription_ = node->create_generic_subscription(
+      topic_name, topic_type, qos, std::forward<Func>(callback), ros2_options);
+  }
+};
+
+// NodeT is rclcpp::Node here (the "interim" call form used by nodes that keep an rclcpp::Node
+// base and still want zero-copy generic subscriptions when Agnocast is enabled at runtime). The
+// Method-2 wrapper Node::create_generic_subscription member in node.hpp dispatches to
+// AgnocastGenericSubscription/ROS2GenericSubscription directly instead, since it already knows
+// the concrete backend from its NodeVariant at the call site.
+template <typename Func>
+GenericSubscription::SharedPtr create_generic_subscription(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, Func && callback,
+  const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+{
+  if (use_agnocast()) {
+    return std::make_shared<AgnocastGenericSubscription>(
+      node, topic_name, topic_type, qos, std::forward<Func>(callback), options);
+  } else {
+    return std::make_shared<ROS2GenericSubscription>(
+      node, topic_name, topic_type, qos, std::forward<Func>(callback), options);
+  }
+}
+
+template <typename Func>
+GenericSubscription::SharedPtr create_generic_subscription(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const size_t qos_history_depth, Func && callback,
+  const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+{
+  return create_generic_subscription(
+    node, topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
+    std::forward<Func>(callback), options);
 }
 
 // Reuse the polling policy tag types (Latest / Newest / All) from autoware_utils_rclcpp so that
@@ -1378,11 +1458,17 @@ inline void set_period(const rclcpp::TimerBase::SharedPtr & timer, std::chrono::
 #define AUTOWARE_CLIENT_SHARED_FUTURE_AND_REQUEST_ID(ServiceT) \
   typename rclcpp::Client<ServiceT>::SharedFutureAndRequestId
 #define AUTOWARE_TIMER_PTR rclcpp::TimerBase::SharedPtr
+#define AUTOWARE_GENERIC_SUBSCRIPTION_PTR rclcpp::GenericSubscription::SharedPtr
 
 #define AUTOWARE_CREATE_SUBSCRIPTION(message_type, topic, qos, callback, options) \
   this->create_subscription<message_type>(topic, qos, callback, options)
 #define AUTOWARE_CREATE_SUBSCRIPTION_ON_NODE(message_type, node, topic, qos, callback, options) \
   node->create_subscription<message_type>(topic, qos, callback, options)
+
+#define AUTOWARE_CREATE_GENERIC_SUBSCRIPTION(topic, topic_type, qos, callback, options) \
+  this->create_generic_subscription(topic, topic_type, qos, callback, options)
+#define AUTOWARE_CREATE_GENERIC_SUBSCRIPTION_ON_NODE(node, topic, topic_type, qos, callback, options) \
+  node->create_generic_subscription(topic, topic_type, qos, callback, options)
 
 #define AUTOWARE_CREATE_PUBLISHER2(message_type, arg1, arg2) \
   this->create_publisher<message_type>(arg1, arg2)
