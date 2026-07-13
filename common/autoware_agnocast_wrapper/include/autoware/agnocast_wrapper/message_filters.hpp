@@ -470,7 +470,9 @@ class Synchronizer
     "Only sync_policies::ApproximateTime<Ms...> and sync_policies::ExactTime<Ms...> are supported.");
 };
 
-/// @brief Curated Synchronizer wrapping ::message_filters::Synchronizer for the non-Agnocast build.
+/// @brief Common synchronizer wrapper parameterized by the underlying upstream policy
+///        (non-Agnocast build). Use through Synchronizer<sync_policies::ApproximateTime<Ms...>> /
+///        Synchronizer<sync_policies::ExactTime<Ms...>>.
 ///
 /// Exposes only the constructor (policy + Subscriber refs) and registerCallback, instead of
 /// aliasing ::message_filters::Synchronizer directly. This keeps the surface identical to the
@@ -478,24 +480,21 @@ class Synchronizer
 /// ENABLE_AGNOCAST=0 and =1. The callback receives `(const AUTOWARE_MESSAGE_CONST_SHARED_PTR(Ms)&
 /// ...)`, which in this build is `std::shared_ptr<const Ms>` — exactly what upstream delivers, so
 /// the callable is forwarded to the underlying synchronizer unchanged.
-template <typename... Ms>
-class Synchronizer<sync_policies::ApproximateTime<Ms...>>
+template <typename UpstreamPolicy, typename... Ms>
+class PolicySynchronizer
 {
-  using UpstreamPolicy = ::message_filters::sync_policies::ApproximateTime<Ms...>;
-  using UpstreamSync = ::message_filters::Synchronizer<UpstreamPolicy>;
-
 public:
-  Synchronizer(const sync_policies::ApproximateTime<Ms...> & policy, Subscriber<Ms> &... subs)
-  : sync_(UpstreamPolicy(policy.queue_size), subs.rclcpp_subscriber()...)
+  PolicySynchronizer(uint32_t queue_size, Subscriber<Ms> &... subs)
+  : sync_(UpstreamPolicy(queue_size), subs.rclcpp_subscriber()...)
   {
   }
 
   // Non-copyable and non-movable: the underlying synchronizer holds connections into the
   // supplied subscribers, so its address must stay stable for the registrations' lifetime.
-  Synchronizer(const Synchronizer &) = delete;
-  Synchronizer & operator=(const Synchronizer &) = delete;
-  Synchronizer(Synchronizer &&) = delete;
-  Synchronizer & operator=(Synchronizer &&) = delete;
+  PolicySynchronizer(const PolicySynchronizer &) = delete;
+  PolicySynchronizer & operator=(const PolicySynchronizer &) = delete;
+  PolicySynchronizer(PolicySynchronizer &&) = delete;
+  PolicySynchronizer & operator=(PolicySynchronizer &&) = delete;
 
   template <class C>
   ::message_filters::Connection registerCallback(C & callback)
@@ -522,53 +521,35 @@ public:
   }
 
 private:
-  UpstreamSync sync_;
+  ::message_filters::Synchronizer<UpstreamPolicy> sync_;
+};
+
+template <typename... Ms>
+class Synchronizer<sync_policies::ApproximateTime<Ms...>>
+: public PolicySynchronizer<::message_filters::sync_policies::ApproximateTime<Ms...>, Ms...>
+{
+  using Base = PolicySynchronizer<::message_filters::sync_policies::ApproximateTime<Ms...>, Ms...>;
+
+public:
+  Synchronizer(const sync_policies::ApproximateTime<Ms...> & policy, Subscriber<Ms> &... subs)
+  : Base(policy.queue_size, subs...)
+  {
+  }
 };
 
 /// @brief Synchronizer specialization for the wrapper-layer ExactTime policy (non-Agnocast build).
+/// @see Synchronizer<sync_policies::ApproximateTime<Ms...>> for the shared implementation.
 template <typename... Ms>
 class Synchronizer<sync_policies::ExactTime<Ms...>>
+: public PolicySynchronizer<::message_filters::sync_policies::ExactTime<Ms...>, Ms...>
 {
-  using UpstreamPolicy = ::message_filters::sync_policies::ExactTime<Ms...>;
-  using UpstreamSync = ::message_filters::Synchronizer<UpstreamPolicy>;
+  using Base = PolicySynchronizer<::message_filters::sync_policies::ExactTime<Ms...>, Ms...>;
 
 public:
   Synchronizer(const sync_policies::ExactTime<Ms...> & policy, Subscriber<Ms> &... subs)
-  : sync_(UpstreamPolicy(policy.queue_size), subs.rclcpp_subscriber()...)
+  : Base(policy.queue_size, subs...)
   {
   }
-
-  Synchronizer(const Synchronizer &) = delete;
-  Synchronizer & operator=(const Synchronizer &) = delete;
-  Synchronizer(Synchronizer &&) = delete;
-  Synchronizer & operator=(Synchronizer &&) = delete;
-
-  template <class C>
-  ::message_filters::Connection registerCallback(C & callback)
-  {
-    return sync_.registerCallback(callback);
-  }
-
-  template <class C>
-  ::message_filters::Connection registerCallback(const C & callback)
-  {
-    return sync_.registerCallback(callback);
-  }
-
-  template <class C, typename T>
-  ::message_filters::Connection registerCallback(C & callback, T * t)
-  {
-    return sync_.registerCallback(callback, t);
-  }
-
-  template <class C, typename T>
-  ::message_filters::Connection registerCallback(const C & callback, T * t)
-  {
-    return sync_.registerCallback(callback, t);
-  }
-
-private:
-  UpstreamSync sync_;
 };
 
 }  // namespace message_filters

@@ -29,6 +29,8 @@
 #include <rclcpp/version.h>
 
 #include <memory>
+#include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -288,48 +290,124 @@ namespace autoware::agnocast_wrapper
 
 /// @brief Curated Buffer for the non-Agnocast build.
 ///
-/// Derives from tf2_ros::Buffer but hides the AsyncBufferInterface members
-/// (waitForTransform / cancel / setCreateTimerInterface) via private using-declarations, so the
-/// public surface matches agnocast::Buffer used in the Agnocast build. agnocast::Buffer omits the
-/// async API because it would deadlock under an AgnocastOnly executor (which does not spin the
-/// timer the async wait relies on); hiding it here keeps that AgnocastOnly-safety constraint
-/// symmetric, so code that compiles under ENABLE_AGNOCAST=0 also compiles under =1. A plain
-/// `using Buffer = tf2_ros::Buffer;` would instead expose waitForTransform under =0 only, allowing
-/// =0-only code that breaks under =1. lookupTransform / canTransform (the synchronous, timeout-
-/// polling path agnocast::Buffer keeps) stay public via inheritance.
-class Buffer : public tf2_ros::Buffer
+/// Holds a tf2_ros::Buffer by value and forwards only the curated member set (construction,
+/// lookupTransform, canTransform), instead of deriving from it. This keeps the public surface
+/// identical to agnocast::Buffer used in the Agnocast build — both omit AsyncBufferInterface
+/// (waitForTransform / cancel / setCreateTimerInterface), which would deadlock under an
+/// AgnocastOnly executor that does not spin the timer the async wait relies on. Deriving from
+/// tf2_ros::Buffer would instead leak the full API (including the async members) via an implicit
+/// upcast to tf2_ros::Buffer& / tf2::BufferCore&, allowing =0-only code that breaks under =1.
+class Buffer
 {
 public:
-  using tf2_ros::Buffer::Buffer;  // inherit constructors
+  explicit Buffer(
+    rclcpp::Clock::SharedPtr clock,
+    tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME),
+    rclcpp::Node::SharedPtr node = rclcpp::Node::SharedPtr())
+  : buffer_(std::move(clock), cache_time, std::move(node))
+  {
+  }
+
+  geometry_msgs::msg::TransformStamped lookupTransform(
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration timeout) const
+  {
+    return buffer_.lookupTransform(target_frame, source_frame, time, timeout);
+  }
+
+  geometry_msgs::msg::TransformStamped lookupTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration timeout = rclcpp::Duration::from_nanoseconds(0)) const
+  {
+    return buffer_.lookupTransform(target_frame, source_frame, time, timeout);
+  }
+
+  geometry_msgs::msg::TransformStamped lookupTransform(
+    const std::string & target_frame, const tf2::TimePoint & target_time,
+    const std::string & source_frame, const tf2::TimePoint & source_time,
+    const std::string & fixed_frame, const tf2::Duration timeout) const
+  {
+    return buffer_.lookupTransform(
+      target_frame, target_time, source_frame, source_time, fixed_frame, timeout);
+  }
+
+  geometry_msgs::msg::TransformStamped lookupTransform(
+    const std::string & target_frame, const rclcpp::Time & target_time,
+    const std::string & source_frame, const rclcpp::Time & source_time,
+    const std::string & fixed_frame,
+    const rclcpp::Duration timeout = rclcpp::Duration::from_nanoseconds(0)) const
+  {
+    return buffer_.lookupTransform(
+      target_frame, target_time, source_frame, source_time, fixed_frame, timeout);
+  }
+
+  bool canTransform(
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration timeout, std::string * errstr = nullptr) const
+  {
+    return buffer_.canTransform(target_frame, source_frame, time, timeout, errstr);
+  }
+
+  bool canTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration timeout = rclcpp::Duration::from_nanoseconds(0),
+    std::string * errstr = nullptr) const
+  {
+    return buffer_.canTransform(target_frame, source_frame, time, timeout, errstr);
+  }
+
+  bool canTransform(
+    const std::string & target_frame, const tf2::TimePoint & target_time,
+    const std::string & source_frame, const tf2::TimePoint & source_time,
+    const std::string & fixed_frame, const tf2::Duration timeout,
+    std::string * errstr = nullptr) const
+  {
+    return buffer_.canTransform(
+      target_frame, target_time, source_frame, source_time, fixed_frame, timeout, errstr);
+  }
+
+  bool canTransform(
+    const std::string & target_frame, const rclcpp::Time & target_time,
+    const std::string & source_frame, const rclcpp::Time & source_time,
+    const std::string & fixed_frame,
+    const rclcpp::Duration timeout = rclcpp::Duration::from_nanoseconds(0),
+    std::string * errstr = nullptr) const
+  {
+    return buffer_.canTransform(
+      target_frame, target_time, source_frame, source_time, fixed_frame, timeout, errstr);
+  }
+
+  // Internal API: used by TransformListener to bind the underlying tf2_ros listener to this
+  // buffer's tf2::BufferCore. Not intended for downstream use.
+  tf2::BufferCore & buffer_core() { return buffer_; }
 
 private:
-  using tf2_ros::Buffer::waitForTransform;
-  using tf2_ros::Buffer::cancel;
-  using tf2_ros::Buffer::setCreateTimerInterface;
+  tf2_ros::Buffer buffer_;
 };
 
 class TransformListener
 {
 public:
   TransformListener(
-    tf2::BufferCore & buffer, Node & node, bool spin_thread = true,
+    Buffer & buffer, Node & node, bool spin_thread = true,
     const rclcpp::QoS & qos = tf2_ros::DynamicListenerQoS(),
     const rclcpp::QoS & static_qos = tf2_ros::StaticListenerQoS())
-  : impl_(buffer, node.get_rclcpp_node().get(), spin_thread, qos, static_qos)
+  : impl_(buffer.buffer_core(), node.get_rclcpp_node().get(), spin_thread, qos, static_qos)
   {
   }
 
   TransformListener(
-    tf2::BufferCore & buffer, Node & node, bool spin_thread, const rclcpp::QoS & qos,
+    Buffer & buffer, Node & node, bool spin_thread, const rclcpp::QoS & qos,
     const rclcpp::QoS & static_qos, const AUTOWARE_SUBSCRIPTION_OPTIONS & options,
     const AUTOWARE_SUBSCRIPTION_OPTIONS & static_options)
   : impl_(
-      buffer, node.get_rclcpp_node().get(), spin_thread, qos, static_qos, options, static_options)
+      buffer.buffer_core(), node.get_rclcpp_node().get(), spin_thread, qos, static_qos, options,
+      static_options)
   {
   }
 
-  explicit TransformListener(tf2::BufferCore & buffer, bool spin_thread = true)
-  : impl_(buffer, spin_thread)
+  explicit TransformListener(Buffer & buffer, bool spin_thread = true)
+  : impl_(buffer.buffer_core(), spin_thread)
   {
   }
 

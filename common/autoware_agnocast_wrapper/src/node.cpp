@@ -84,16 +84,6 @@ rclcpp::node_interfaces::NodeTopicsInterface::SharedPtr Node::get_node_topics_in
   return visit_node([](const auto & n) { return n->get_node_topics_interface(); });
 }
 
-rclcpp::node_interfaces::NodeTimersInterface::SharedPtr Node::get_node_timers_interface()
-{
-  if (auto * n = std::get_if<std::shared_ptr<rclcpp::Node>>(&node_)) {
-    return (*n)->get_node_timers_interface();
-  }
-  throw std::runtime_error(
-    "get_node_timers_interface() is not available in agnocast mode; "
-    "agnocast::Node does not expose a NodeTimersInterface.");
-}
-
 rclcpp::node_interfaces::NodeParametersInterface::SharedPtr Node::get_node_parameters_interface()
   const
 {
