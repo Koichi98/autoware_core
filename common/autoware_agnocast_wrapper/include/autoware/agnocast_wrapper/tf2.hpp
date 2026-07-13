@@ -286,7 +286,27 @@ namespace autoware::agnocast_wrapper
 // Agnocast-disabled build: thin composition wrappers over the tf2_ros types. Constructor
 // signatures match the agnocast-enabled build above.
 
-using Buffer = tf2_ros::Buffer;
+/// @brief Curated Buffer for the non-Agnocast build.
+///
+/// Derives from tf2_ros::Buffer but hides the AsyncBufferInterface members
+/// (waitForTransform / cancel / setCreateTimerInterface) via private using-declarations, so the
+/// public surface matches agnocast::Buffer used in the Agnocast build. agnocast::Buffer omits the
+/// async API because it would deadlock under an AgnocastOnly executor (which does not spin the
+/// timer the async wait relies on); hiding it here keeps that AgnocastOnly-safety constraint
+/// symmetric, so code that compiles under ENABLE_AGNOCAST=0 also compiles under =1. A plain
+/// `using Buffer = tf2_ros::Buffer;` would instead expose waitForTransform under =0 only, allowing
+/// =0-only code that breaks under =1. lookupTransform / canTransform (the synchronous, timeout-
+/// polling path agnocast::Buffer keeps) stay public via inheritance.
+class Buffer : public tf2_ros::Buffer
+{
+public:
+  using tf2_ros::Buffer::Buffer;  // inherit constructors
+
+private:
+  using tf2_ros::Buffer::waitForTransform;
+  using tf2_ros::Buffer::cancel;
+  using tf2_ros::Buffer::setCreateTimerInterface;
+};
 
 class TransformListener
 {

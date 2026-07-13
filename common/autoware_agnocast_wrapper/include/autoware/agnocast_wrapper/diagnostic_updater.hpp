@@ -270,14 +270,15 @@ namespace autoware::agnocast_wrapper
 namespace diagnostic_updater
 {
 
-/// @brief Pass-through Updater for the non-Agnocast build.
+/// @brief Curated Updater for the non-Agnocast build.
 ///
-/// Inherits from ::diagnostic_updater::Updater and re-declares only the
-/// `Updater(Node*, double)` constructor; base-class constructors are not
-/// implicitly inherited in C++, so the upstream template and interface-pointer
-/// constructors stay hidden. This keeps the supported signature identical to
-/// the agnocast-enabled build. All other public members are inherited as-is.
-class Updater : public ::diagnostic_updater::Updater
+/// Holds a ::diagnostic_updater::Updater by value and forwards only the curated member set
+/// shared with the Agnocast build, instead of deriving from it. This keeps the public surface
+/// identical to the Agnocast-build Updater, so code that compiles under ENABLE_AGNOCAST=0 also
+/// compiles under =1. Deriving from ::diagnostic_updater::Updater would instead leak its full API
+/// (e.g. the upstream template / interface-pointer constructors, setVerbose, etc.) into the =0
+/// build, allowing =0-only code that breaks under =1.
+class Updater
 {
 public:
   /// @brief Construct from a wrapper Node and update period.
@@ -295,9 +296,78 @@ public:
   ///       `::agnocast::Updater` does not support it, and the wrapper keeps a
   ///       single signature shared by both backends.
   explicit Updater(autoware::agnocast_wrapper::Node * node, double period = 1.0)
-  : ::diagnostic_updater::Updater(node->get_rclcpp_node(), period)
+  : logger_(node->get_logger()), impl_(node->get_rclcpp_node(), period), verbose_(impl_.verbose_)
   {
   }
+
+  /// @brief Register a diagnostic task by name and callable.
+  void add(const std::string & name, ::diagnostic_updater::TaskFunction f) { impl_.add(name, f); }
+
+  /// @brief Register a diagnostic task object by reference.
+  void add(::diagnostic_updater::DiagnosticTask & task) { impl_.add(task); }
+
+  /// @brief Register a diagnostic task by name and member function pointer.
+  template <class T>
+  void add(
+    const std::string name, T * c, void (T::*f)(::diagnostic_updater::DiagnosticStatusWrapper &))
+  {
+    impl_.add(name, c, f);
+  }
+
+  /// @brief Remove a previously added task by name.
+  bool removeByName(const std::string name) { return impl_.removeByName(name); }
+
+  /// @brief Get the current update period as rclcpp::Duration.
+  auto getPeriod() const { return impl_.getPeriod(); }
+
+  /// @brief Set the update period from rclcpp::Duration.
+  void setPeriod(rclcpp::Duration period) { impl_.setPeriod(period); }
+
+  /// @brief Set the update period in seconds.
+  void setPeriod(double period) { impl_.setPeriod(period); }
+
+  /// @brief Force an immediate update of all known DiagnosticStatus tasks.
+  void force_update() { impl_.force_update(); }
+
+  /// @brief Publish a single status with the given level and message across all tasks.
+  void broadcast(unsigned char lvl, const std::string msg) { impl_.broadcast(lvl, msg); }
+
+  /// @brief Set the hardware ID embedded in every published DiagnosticStatus.
+  void setHardwareID(const std::string & hwid) { impl_.setHardwareID(hwid); }
+
+  /// @brief printf-style variant of setHardwareID, with truncation reported via RCLCPP_DEBUG.
+  ///
+  /// Pre-formats here (rather than forwarding varargs) so truncation can be warned on, mirroring
+  /// the Agnocast-build overload; storage is delegated to setHardwareID -> impl_.
+  void setHardwareIDf(const char * format, ...)
+  {
+    va_list va;
+    constexpr int kBufferSize = 1000;
+    char buff[kBufferSize];
+    va_start(va, format);
+    if (vsnprintf(buff, kBufferSize, format, va) >= kBufferSize) {
+      RCLCPP_DEBUG(logger_, "Really long string in diagnostic_updater::setHardwareIDf.");
+    }
+    va_end(va);
+    setHardwareID(std::string(buff));
+  }
+
+  // Non-copyable and non-movable: matches the Agnocast-build Updater, whose `verbose_` is a
+  // reference bound to the underlying impl and cannot be reseated.
+  Updater(const Updater &) = delete;
+  Updater & operator=(const Updater &) = delete;
+  Updater(Updater &&) = delete;
+  Updater & operator=(Updater &&) = delete;
+
+private:
+  rclcpp::Logger logger_;
+  ::diagnostic_updater::Updater impl_;
+
+public:
+  /// Mirrors ::diagnostic_updater::Updater::verbose_. Bound by reference so
+  /// `updater.verbose_ = true;` writes through to the underlying impl, matching the
+  /// field-access idiom of the Agnocast-build Updater.
+  bool & verbose_;
 };
 
 }  // namespace diagnostic_updater

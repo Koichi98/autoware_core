@@ -100,6 +100,9 @@ public:
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr get_node_base_interface() const;
   rclcpp::node_interfaces::NodeTopicsInterface::SharedPtr get_node_topics_interface() const;
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr get_node_parameters_interface() const;
+  // @throws std::runtime_error in agnocast mode: agnocast::Node has no NodeTimersInterface.
+  // Only reachable via the tf2_ros::Buffer path, which is compiled out when agnocast is enabled.
+  rclcpp::node_interfaces::NodeTimersInterface::SharedPtr get_node_timers_interface();
 
   // ===== Callback groups =====
   rclcpp::CallbackGroup::SharedPtr create_callback_group(
@@ -518,6 +521,10 @@ public:
   rclcpp::node_interfaces::NodeTopicsInterface::SharedPtr get_node_topics_interface() const
   {
     return node_->get_node_topics_interface();
+  }
+  rclcpp::node_interfaces::NodeTimersInterface::SharedPtr get_node_timers_interface()
+  {
+    return node_->get_node_timers_interface();
   }
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr get_node_parameters_interface() const
   {
