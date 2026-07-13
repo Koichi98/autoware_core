@@ -111,6 +111,14 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_discovery_agent_launch
     test/test_discovery_agent_launch.py
   )
+
+  # Client/Service round-trip via ROS2Client/ROS2Service, compiles and runs identically regardless
+  # of ENABLE_AGNOCAST (see test/test_client_service.cpp for why).
+  find_package(ament_cmake_ros REQUIRED)
+  find_package(std_srvs REQUIRED)
+  ament_add_ros_isolated_gtest(test_client_service test/test_client_service.cpp)
+  target_link_libraries(test_client_service ${PROJECT_NAME})
+  ament_target_dependencies(test_client_service std_srvs)
 endif()
 
 autoware_ament_auto_package()
