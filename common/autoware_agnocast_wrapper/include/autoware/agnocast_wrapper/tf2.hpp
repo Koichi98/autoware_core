@@ -300,7 +300,9 @@ namespace autoware::agnocast_wrapper
 class Buffer
 {
 public:
-  explicit Buffer(
+  // cppcheck-suppress noExplicitConstructor  // matches tf2_ros::Buffer signature (upstream
+  // alignment)
+  Buffer(
     rclcpp::Clock::SharedPtr clock,
     tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME),
     rclcpp::Node::SharedPtr node = rclcpp::Node::SharedPtr())
