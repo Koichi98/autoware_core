@@ -556,10 +556,11 @@ void setSubscriber(
  * @param data The data to publish.
  * @param repeat_count The number of times to retry publishing.
  */
-template <typename T>
+template <typename T, typename TargetNodeT = rclcpp::Node>
 void publishToTargetNode(
-  rclcpp::Node::SharedPtr test_node, rclcpp::Node::SharedPtr target_node, std::string topic_name,
-  typename rclcpp::Publisher<T>::SharedPtr publisher, const T & data, const int repeat_count = 3)
+  rclcpp::Node::SharedPtr test_node, std::shared_ptr<TargetNodeT> target_node,
+  std::string topic_name, typename rclcpp::Publisher<T>::SharedPtr publisher, const T & data,
+  const int repeat_count = 3)
 {
   if (topic_name.empty()) {
     int status = 1;
@@ -573,7 +574,7 @@ void publishToTargetNode(
   autoware::test_utils::setPublisher<T>(test_node, topic_name, publisher);
   publisher->publish(data);
 
-  if (target_node->count_subscribers(topic_name) == 0) {
+  if (publisher->get_subscription_count() == 0) {
     throw std::runtime_error("No subscriber for " + topic_name);
   }
   autoware::test_utils::spinSomeNodes(

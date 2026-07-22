@@ -31,16 +31,21 @@
   }
 
 #include <autoware/component_interface_specs/planning.hpp>
+#include <autoware/motion_utils/trajectory/conversion.hpp>
 #include <autoware_test_utils/autoware_test_utils.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
 
+#include <autoware_internal_planning_msgs/msg/path_with_lane_id.hpp>
+#include <autoware_planning_msgs/msg/lanelet_route.hpp>
+#include <autoware_planning_msgs/msg/path.hpp>
 #include <autoware_planning_msgs/msg/trajectory.hpp>
 
 #include <gtest/gtest.h>
 
 #include <ctime>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -53,9 +58,9 @@ class PlanningInterfaceTestManager
 public:
   PlanningInterfaceTestManager();
 
-  template <typename InputT>
+  template <typename InputT, typename NodeT = rclcpp::Node>
   void publishInput(
-    const rclcpp::Node::SharedPtr target_node, const std::string & topic_name, const InputT & input,
+    const std::shared_ptr<NodeT> target_node, const std::string & topic_name, const InputT & input,
     const int repeat_count = 3) const
   {
     autoware::test_utils::publishToTargetNode(
@@ -83,33 +88,114 @@ public:
       topic_name, [this](const typename OutputT::ConstSharedPtr) { received_topic_num_++; });
   }
 
-  void testWithNormalTrajectory(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+  template <typename NodeT = rclcpp::Node>
+  void testWithNormalTrajectory(std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(
+      target_node, topic_name,
+      autoware::test_utils::generateTrajectory<autoware_planning_msgs::msg::Trajectory>(10, 1.0),
+      5);
+  }
+
+  template <typename NodeT = rclcpp::Node>
   void testWithAbnormalTrajectory(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+    std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(target_node, topic_name, autoware_planning_msgs::msg::Trajectory{}, 5);
+    publishInput(
+      target_node, topic_name,
+      autoware::test_utils::generateTrajectory<autoware_planning_msgs::msg::Trajectory>(1, 0.0), 5);
+    publishInput(
+      target_node, topic_name,
+      autoware::test_utils::generateTrajectory<autoware_planning_msgs::msg::Trajectory>(
+        10, 0.0, 0.0, 0.0, 0.0, 1),
+      5);
+  }
 
-  void testWithNormalRoute(rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
-  void testWithAbnormalRoute(rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+  template <typename NodeT = rclcpp::Node>
+  void testWithNormalRoute(std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(target_node, topic_name, autoware::test_utils::makeNormalRoute(), 5);
+  }
 
+  template <typename NodeT = rclcpp::Node>
+  void testWithAbnormalRoute(std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(target_node, topic_name, autoware_planning_msgs::msg::LaneletRoute{}, 5);
+  }
+
+  template <typename NodeT = rclcpp::Node>
   void testWithBehaviorNormalRoute(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+    std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(target_node, topic_name, autoware::test_utils::makeBehaviorNormalRoute(), 5);
+  }
 
+  template <typename NodeT = rclcpp::Node>
   void testWithBehaviorGoalOnLeftSide(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+    std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(
+      target_node, topic_name, autoware::test_utils::makeBehaviorGoalOnLeftSideRoute(), 5);
+  }
 
+  template <typename NodeT = rclcpp::Node>
   void testWithNormalPathWithLaneId(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+    std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    try {
+      const auto path = autoware::test_utils::loadPathWithLaneIdInYaml();
+      publishInput(target_node, topic_name, path, 5);
+    } catch (const std::exception & e) {
+      std::cerr << e.what() << '\n';
+    }
+  }
+
+  template <typename NodeT = rclcpp::Node>
   void testWithAbnormalPathWithLaneId(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+    std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(
+      target_node, topic_name, autoware_internal_planning_msgs::msg::PathWithLaneId{}, 5);
+  }
 
-  void testWithNormalPath(rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
-  void testWithAbnormalPath(rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+  template <typename NodeT = rclcpp::Node>
+  void testWithNormalPath(std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    try {
+      const auto path = autoware::test_utils::loadPathWithLaneIdInYaml();
+      publishInput(
+        target_node, topic_name,
+        autoware::motion_utils::convertToPath<autoware_internal_planning_msgs::msg::PathWithLaneId>(
+          path),
+        5);
+    } catch (const std::exception & e) {
+      std::cerr << e.what() << '\n';
+    }
+  }
 
+  template <typename NodeT = rclcpp::Node>
+  void testWithAbnormalPath(std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    publishInput(target_node, topic_name, autoware_planning_msgs::msg::Path{}, 5);
+  }
+
+  template <typename NodeT = rclcpp::Node>
   void testWithOffTrackInitialPoses(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+    std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    for (const auto & deviation : {0.0, 1.0, 10.0, 100.0}) {
+      publishInput(target_node, topic_name, autoware::test_utils::makeInitialPose(deviation), 5);
+    }
+  }
 
-  void testWithOffTrackOdometry(
-    rclcpp::Node::SharedPtr target_node, const std::string & topic_name);
+  template <typename NodeT = rclcpp::Node>
+  void testWithOffTrackOdometry(std::shared_ptr<NodeT> target_node, const std::string & topic_name)
+  {
+    for (const auto & deviation : {0.0, 1.0, 10.0, 100.0}) {
+      publishInput(target_node, topic_name, autoware::test_utils::makeOdometry(deviation), 5);
+    }
+  }
 
   void resetReceivedTopicNum() { received_topic_num_ = 0; }
 
