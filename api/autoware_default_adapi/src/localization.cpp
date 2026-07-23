@@ -14,10 +14,10 @@
 
 #include "localization.hpp"
 
+#include "utils/agnocast_compat.hpp"
 #include "utils/localization_conversion.hpp"
 
 #include <autoware/component_interface_specs/utils.hpp>
-#include <autoware/qos_utils/qos_compatibility.hpp>
 
 namespace autoware::default_adapi
 {
@@ -35,10 +35,12 @@ LocalizationNode::LocalizationNode(const rclcpp::NodeOptions & options)
     autoware::adapi_specs::localization::InitializationState::name,
     autoware::component_interface_specs::get_qos<
       autoware::adapi_specs::localization::InitializationState>());
-  srv_initialize_ = create_service<autoware::adapi_specs::localization::Initialize::Service>(
-    autoware::adapi_specs::localization::Initialize::name,
-    std::bind(&LocalizationNode::on_initialize, this, std::placeholders::_1, std::placeholders::_2),
-    AUTOWARE_DEFAULT_SERVICES_QOS_PROFILE(), group_cli_);
+  srv_initialize_ =
+    agnocast_compat::create_service<autoware::adapi_specs::localization::Initialize::Service>(
+      this, autoware::adapi_specs::localization::Initialize::name,
+      std::bind(
+        &LocalizationNode::on_initialize, this, std::placeholders::_1, std::placeholders::_2),
+      rclcpp::ServicesQoS(), group_cli_);
 
   // Component Interface
   sub_state_ = create_subscription<
@@ -46,10 +48,11 @@ LocalizationNode::LocalizationNode(const rclcpp::NodeOptions & options)
     autoware::component_interface_specs::localization::InitializationState::name,
     autoware::component_interface_specs::get_qos<
       autoware::component_interface_specs::localization::InitializationState>(),
-    std::bind(&LocalizationNode::on_state, this, std::placeholders::_1));
+    [this](const ImplState::Message & msg) { on_state(msg); });
   cli_initialize_ =
     create_client<autoware::component_interface_specs::localization::Initialize::Service>(
-      autoware::component_interface_specs::localization::Initialize::name);
+      autoware::component_interface_specs::localization::Initialize::name, rclcpp::ServicesQoS(),
+      group_cli_);
 
   state_.state = ImplState::Message::UNKNOWN;
 }
@@ -66,10 +69,10 @@ void LocalizationNode::diagnose_state(diagnostic_updater::DiagnosticStatusWrappe
   }
 }
 
-void LocalizationNode::on_state(const ImplState::Message::ConstSharedPtr msg)
+void LocalizationNode::on_state(const ImplState::Message & msg)
 {
-  state_ = *msg;
-  pub_state_->publish(*msg);
+  state_ = msg;
+  pub_state_->publish(msg);
 }
 
 void LocalizationNode::on_initialize(

@@ -28,6 +28,8 @@
 #include <autoware_planning_msgs/srv/set_lanelet_route.hpp>
 #include <autoware_planning_msgs/srv/set_waypoint_route.hpp>
 
+#include <utility>
+
 namespace autoware::default_adapi::conversion
 {
 
@@ -59,7 +61,11 @@ ExternalResponse convert_response(const InternalResponse & internal);
 template <class ClientT, class RequestT>
 ExternalResponse convert_call(ClientT & client, RequestT & req)
 {
-  auto future = client->async_send_request(convert_request(req));
+  // client is an agnocast_wrapper client (AUTOWARE_CLIENT_PTR): allocate the request from the
+  // client, copy in the converted fields, then send. Works for both ENABLE_AGNOCAST=0 and =1.
+  auto request = client->allocate_output_service_request();
+  *request = *convert_request(req);
+  auto future = client->async_send_request(std::move(request)).future;
   return convert_response(future.get()->status);
 }
 

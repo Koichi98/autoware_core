@@ -16,6 +16,8 @@
 #define LOCALIZATION_HPP_
 
 #include <autoware/adapi_specs/localization.hpp>
+#include <autoware/agnocast_wrapper/diagnostic_updater.hpp>
+#include <autoware/agnocast_wrapper/node.hpp>
 #include <autoware/component_interface_specs/localization.hpp>
 #include <diagnostic_updater/diagnostic_updater.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -23,7 +25,7 @@
 namespace autoware::default_adapi
 {
 
-class LocalizationNode : public rclcpp::Node
+class LocalizationNode : public autoware::agnocast_wrapper::Node
 {
 public:
   explicit LocalizationNode(const rclcpp::NodeOptions & options);
@@ -32,24 +34,23 @@ private:
   using ImplState = autoware::component_interface_specs::localization::InitializationState;
 
   rclcpp::CallbackGroup::SharedPtr group_cli_;
-  rclcpp::Service<autoware::adapi_specs::localization::Initialize::Service>::SharedPtr
-    srv_initialize_;
-  rclcpp::Publisher<autoware::adapi_specs::localization::InitializationState::Message>::SharedPtr
-    pub_state_;
-  rclcpp::Client<autoware::component_interface_specs::localization::Initialize::Service>::SharedPtr
-    cli_initialize_;
-  rclcpp::Subscription<
-    autoware::component_interface_specs::localization::InitializationState::Message>::SharedPtr
-    sub_state_;
+  AUTOWARE_SERVICE_PTR(autoware::adapi_specs::localization::Initialize::Service) srv_initialize_;
+  AUTOWARE_PUBLISHER_PTR(autoware::adapi_specs::localization::InitializationState::Message)
+  pub_state_;
+  AUTOWARE_CLIENT_PTR(autoware::component_interface_specs::localization::Initialize::Service)
+  cli_initialize_;
+  AUTOWARE_SUBSCRIPTION_PTR(
+    autoware::component_interface_specs::localization::InitializationState::Message)
+  sub_state_;
 
   void diagnose_state(diagnostic_updater::DiagnosticStatusWrapper & stat);
-  void on_state(const ImplState::Message::ConstSharedPtr msg);
+  void on_state(const ImplState::Message & msg);
   void on_initialize(
     const autoware::adapi_specs::localization::Initialize::Service::Request::SharedPtr req,
     const autoware::adapi_specs::localization::Initialize::Service::Response::SharedPtr res);
 
   ImplState::Message state_;
-  diagnostic_updater::Updater diagnostics_;
+  autoware::agnocast_wrapper::diagnostic_updater::Updater diagnostics_;
 };
 
 }  // namespace autoware::default_adapi
