@@ -15,24 +15,39 @@
 #ifndef AUTOWARE__COMPONENT_INTERFACE_UTILS__RCLCPP__TOPIC_SUBSCRIPTION_HPP_
 #define AUTOWARE__COMPONENT_INTERFACE_UTILS__RCLCPP__TOPIC_SUBSCRIPTION_HPP_
 
+#include <rclcpp/node.hpp>
+#include <rclcpp/qos.hpp>
 #include <rclcpp/subscription.hpp>
 
+#include <functional>
 #include <memory>
+#include <string>
+#include <utility>
 
 namespace autoware::component_interface_utils
 {
 
-/// The wrapper class of rclcpp::Subscription. This is for future use and no functionality now.
-template <class SpecT>
+/// The wrapper class of a subscription. The handle type is deduced from the node's
+/// create_subscription(), so it is rclcpp::Subscription<Message> for the default NodeT.
+///
+/// NOTE: take() and take_and_update() need the handle to provide rclcpp's take(). Being ordinary
+/// members of a class template they are instantiated only when called, so a node type whose
+/// subscription has no take() can still use the rest of this wrapper.
+template <class SpecT, class NodeT = rclcpp::Node>
 class Subscription
 {
 public:
   RCLCPP_SMART_PTR_DEFINITIONS(Subscription)
   using SpecType = SpecT;
-  using WrapType = rclcpp::Subscription<typename SpecT::Message>;
+  using NodeType = NodeT;
+  using WrapSharedPtr =
+    decltype(std::declval<NodeT &>().template create_subscription<typename SpecT::Message>(
+      std::declval<const std::string &>(), std::declval<const rclcpp::QoS &>(),
+      std::declval<std::function<void(const typename SpecT::Message &)>>()));
+  using WrapType = typename WrapSharedPtr::element_type;
 
   /// Constructor.
-  explicit Subscription(typename WrapType::SharedPtr subscription)
+  explicit Subscription(WrapSharedPtr subscription)
   {
     subscription_ = subscription;  // to keep the reference count
   }

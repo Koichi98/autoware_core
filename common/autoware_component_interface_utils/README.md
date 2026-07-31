@@ -66,6 +66,26 @@ pub_ = node.create_publisher<SampleMessage>();
 sub_ = node.create_subscription<SampleMessage>(callback);
 ```
 
+## Node type
+
+The adaptor and the wrappers are templated on the node type, which defaults to `rclcpp::Node`, so every spelling above keeps its previous meaning.
+`NodeAdaptor(this)` is `NodeAdaptor<rclcpp::Node>` even when `this` is a derived node, and `Publisher<SampleMessage>` is `Publisher<SampleMessage, rclcpp::Node>`.
+
+Another node type is used by naming it on the adaptor and on the member declarations.
+The endpoint type each wrapper holds is deduced from that node's own `create_publisher()`, `create_subscription()`, `create_service()` and `create_client()`, so no endpoint type is fixed to rclcpp's.
+
+```cpp
+// header file
+autoware::component_interface_utils::Publisher<SampleMessage, SomeNode>::SharedPtr pub_;
+
+// source file
+auto node = autoware::component_interface_utils::NodeAdaptor<SomeNode>(this);
+pub_ = node.create_publisher<SampleMessage>();
+```
+
+Note that `Subscription::take()` and `Subscription::take_and_update()` need the node's subscription to provide rclcpp's `take()`.
+A node type whose subscription does not can still use the rest of the wrapper as long as it does not call them.
+
 ## Opt-in service introspection for service and client
 
 This package does not trace service calls by itself.
