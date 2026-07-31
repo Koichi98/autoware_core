@@ -66,11 +66,20 @@ template <class SpecT, class NodeT, class CallbackT>
 typename Subscription<SpecT, NodeT>::SharedPtr create_subscription_impl(
   NodeT * node, CallbackT && callback)
 {
-  if constexpr (!std::is_null_pointer_v<CallbackT>) {
-    // This function is a wrapper for the following.
-    // https://github.com/ros2/rclcpp/blob/48068130edbb43cdd61076dc1851672ff1a80408/rclcpp/include/rclcpp/node.hpp#L207-L238
+  if constexpr (std::is_invocable_v<CallbackT, const typename SpecT::Message &>) {
+    // The callback takes a const reference, which every node type accepts.
     auto subscription = node->template create_subscription<typename SpecT::Message>(
       SpecT::name, get_qos<SpecT>(), std::forward<CallbackT>(callback));
+    return Subscription<SpecT, NodeT>::make_shared(subscription);
+  } else if constexpr (!std::is_null_pointer_v<CallbackT>) {
+    // The callback takes Message::ConstSharedPtr, which a node type that only supports const
+    // reference callbacks cannot take. Adapt it at the cost of one copy per message.
+    auto adapted = [callback = std::forward<CallbackT>(callback)](
+                     const typename SpecT::Message & msg) {
+      callback(std::make_shared<const typename SpecT::Message>(msg));
+    };
+    auto subscription = node->template create_subscription<typename SpecT::Message>(
+      SpecT::name, get_qos<SpecT>(), adapted);
     return Subscription<SpecT, NodeT>::make_shared(subscription);
   } else {
     // If the callback is nullptr, create a subscription for polling.

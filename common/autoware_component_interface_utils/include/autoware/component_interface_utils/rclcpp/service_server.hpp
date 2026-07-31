@@ -35,9 +35,9 @@ template <class SpecT>
 using ServiceCallbackFn = std::function<void(
   typename SpecT::Service::Request::SharedPtr, typename SpecT::Service::Response::SharedPtr)>;
 
-/// True when the node's create_service() takes rclcpp::QoS. ROS 2 Iron (rclcpp 21) onward does,
-/// while Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload. Detected on the node
-/// rather than gated on the rclcpp version, so the choice follows the node and not the distro.
+/// True when the node's create_service() takes rclcpp::QoS. ROS 2 Iron (rclcpp 21) onward does;
+/// Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload. Detected rather than gated on
+/// the distro so that a node type offering only the QoS overload also works.
 template <class SpecT, class NodeT, class = void>
 struct has_qos_create_service : std::false_type
 {

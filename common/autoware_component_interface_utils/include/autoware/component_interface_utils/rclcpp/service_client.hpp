@@ -30,9 +30,9 @@
 namespace autoware::component_interface_utils
 {
 
-/// True when the node's create_client() takes rclcpp::QoS. ROS 2 Iron (rclcpp 21) onward does,
-/// while Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload. Detected on the node
-/// rather than gated on the rclcpp version, so the choice follows the node and not the distro.
+/// True when the node's create_client() takes rclcpp::QoS. ROS 2 Iron (rclcpp 21) onward does;
+/// Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload. Detected rather than gated on
+/// the distro so that a node type offering only the QoS overload also works.
 template <class SpecT, class NodeT, class = void>
 struct has_qos_create_client : std::false_type
 {
@@ -59,9 +59,24 @@ auto create_client_handle(NodeT * node, rclcpp::CallbackGroup::SharedPtr group)
   }
 }
 
+/// True when the handle's async_send_request() accepts a shared_ptr request without taking
+/// ownership, as rclcpp::Client does. A handle that requires an owned (rvalue) request instead
+/// needs the request allocated from it and copied in.
+template <class HandleT, class RequestPtrT, class = void>
+struct accepts_shared_request : std::false_type
+{
+};
+template <class HandleT, class RequestPtrT>
+struct accepts_shared_request<
+  HandleT, RequestPtrT,
+  std::void_t<decltype(std::declval<HandleT &>().async_send_request(
+    std::declval<RequestPtrT &>()))>> : std::true_type
+{
+};
+
 #if AUTOWARE_COMPONENT_INTERFACE_UTILS_RCLCPP_GE_IRON
-/// True when the handle supports ROS 2 service introspection. rclcpp's Client and Service do; a
-/// handle without configure_introspection() cannot be traced this way.
+/// True when the handle supports ROS 2 service introspection (rclcpp's Client / Service do; a
+/// handle that does not expose configure_introspection() cannot be traced this way).
 template <class HandleT, class = void>
 struct has_configure_introspection : std::false_type
 {
@@ -119,31 +134,49 @@ public:
       throw ServiceUnready(SpecT::name);
     }
 
-    const auto future = this->async_send_request(request);
+    auto future = this->async_send_request(request);
     if (timeout) {
       const auto duration = std::chrono::duration<double, std::ratio<1>>(timeout.value());
       if (future.wait_for(duration) != std::future_status::ready) {
         throw ServiceTimeout(SpecT::name);
       }
     }
-    return future.get();
+    auto response = future.get();
+    if constexpr (std::is_same_v<decltype(response), SharedResponse>) {
+      return response;
+    } else {
+      // The handle owns the response (and may hand out a const one), so copy it out to keep
+      // call()'s return type the same for every node type.
+      return std::make_shared<typename SpecT::Service::Response>(*response);
+    }
   }
 
   /// Send request.
-  SharedFuture async_send_request(SharedRequest request)
+  auto async_send_request(SharedRequest request)
   {
-    return client_->async_send_request(request).future;
+    if constexpr (accepts_shared_request<WrapType, SharedRequest>::value) {
+      return client_->async_send_request(request).future;
+    } else {
+      auto req = client_->allocate_output_service_request();
+      *req = *request;
+      return client_->async_send_request(std::move(req)).future;
+    }
   }
 
   /// Send request with a response callback. The callback is wrapped in a
   /// concrete-signature lambda so callers may pass a generic (auto-parameter)
   /// callback, which rclcpp::Client::async_send_request would otherwise reject.
   template <class CallbackT>
-  SharedFuture async_send_request(SharedRequest request, CallbackT && callback)
+  auto async_send_request(SharedRequest request, CallbackT && callback)
   {
-    return client_
-      ->async_send_request(request, [callback](SharedFuture future) { callback(future); })
-      .future;
+    const auto wrapped = [callback](typename WrapType::SharedFuture future) { callback(future); };
+    if constexpr (accepts_shared_request<WrapType, SharedRequest>::value) {
+      return client_->async_send_request(request, wrapped).future;
+    } else {
+      auto req = client_->allocate_output_service_request();
+      *req = *request;
+      return client_->async_send_request(std::move(req), wrapped).future;
+    }
   }
 
   /// Check if the service is ready.
