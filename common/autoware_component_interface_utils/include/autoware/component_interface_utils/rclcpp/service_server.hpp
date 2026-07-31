@@ -17,10 +17,12 @@
 
 #include <autoware/component_interface_utils/rclcpp/exceptions.hpp>
 #include <autoware/component_interface_utils/rclcpp/interface.hpp>
+#include <autoware/component_interface_utils/rclcpp/service_client.hpp>
 #include <rclcpp/node.hpp>
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -33,20 +35,35 @@ template <class SpecT>
 using ServiceCallbackFn = std::function<void(
   typename SpecT::Service::Request::SharedPtr, typename SpecT::Service::Response::SharedPtr)>;
 
-/// Create the underlying service handle. ROS 2 Iron (rclcpp 21) onward takes rclcpp::QoS while
-/// Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload, so gate the call in one place.
+/// True when the node's create_service() takes rclcpp::QoS. ROS 2 Iron (rclcpp 21) onward does,
+/// while Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload. Detected on the node
+/// rather than gated on the rclcpp version, so the choice follows the node and not the distro.
+template <class SpecT, class NodeT, class = void>
+struct has_qos_create_service : std::false_type
+{
+};
+template <class SpecT, class NodeT>
+struct has_qos_create_service<
+  SpecT, NodeT,
+  std::void_t<decltype(std::declval<NodeT &>().template create_service<typename SpecT::Service>(
+    std::declval<const std::string &>(), std::declval<ServiceCallbackFn<SpecT>>(),
+    std::declval<const rclcpp::QoS &>(), std::declval<rclcpp::CallbackGroup::SharedPtr>()))>>
+: std::true_type
+{
+};
+
+/// Create the underlying service handle.
 template <class SpecT, class NodeT>
 auto create_service_handle(
   NodeT * node, ServiceCallbackFn<SpecT> callback, rclcpp::CallbackGroup::SharedPtr group)
 {
-#if AUTOWARE_COMPONENT_INTERFACE_UTILS_RCLCPP_GE_IRON
-  return node->template create_service<typename SpecT::Service>(
-    SpecT::name, callback, rclcpp::ServicesQoS(), group);
-#else
-  // ROS 2 Humble exposes only the (non-deprecated) rmw_qos_profile_t overload.
-  return node->template create_service<typename SpecT::Service>(
-    SpecT::name, callback, rmw_qos_profile_services_default, group);
-#endif
+  if constexpr (has_qos_create_service<SpecT, NodeT>::value) {
+    return node->template create_service<typename SpecT::Service>(
+      SpecT::name, callback, rclcpp::ServicesQoS(), group);
+  } else {
+    return node->template create_service<typename SpecT::Service>(
+      SpecT::name, callback, rmw_qos_profile_services_default, group);
+  }
 }
 
 /// The wrapper class of a service server. Service-call tracing is provided by ROS 2
@@ -92,9 +109,11 @@ public:
   {
     service_ = create_service_handle<SpecT>(interface_->node, wrap(callback), group);
 #if AUTOWARE_COMPONENT_INTERFACE_UTILS_RCLCPP_GE_IRON
-    if (interface_->introspection_state != RCL_SERVICE_INTROSPECTION_OFF) {
-      service_->configure_introspection(
-        interface_->node->get_clock(), rclcpp::QoS(1), interface_->introspection_state);
+    if constexpr (has_configure_introspection<WrapType>::value) {
+      if (interface_->introspection_state != RCL_SERVICE_INTROSPECTION_OFF) {
+        service_->configure_introspection(
+          interface_->node->get_clock(), rclcpp::QoS(1), interface_->introspection_state);
+      }
     }
 #endif
   }

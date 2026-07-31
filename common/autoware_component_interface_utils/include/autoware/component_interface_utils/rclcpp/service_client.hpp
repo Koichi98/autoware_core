@@ -23,25 +23,57 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace autoware::component_interface_utils
 {
 
-/// Create the underlying client handle. ROS 2 Iron (rclcpp 21) onward takes rclcpp::QoS while
-/// Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload, so gate the call in one place.
+/// True when the node's create_client() takes rclcpp::QoS. ROS 2 Iron (rclcpp 21) onward does,
+/// while Humble (rclcpp 16) exposes only the rmw_qos_profile_t overload. Detected on the node
+/// rather than gated on the rclcpp version, so the choice follows the node and not the distro.
+template <class SpecT, class NodeT, class = void>
+struct has_qos_create_client : std::false_type
+{
+};
+template <class SpecT, class NodeT>
+struct has_qos_create_client<
+  SpecT, NodeT,
+  std::void_t<decltype(std::declval<NodeT &>().template create_client<typename SpecT::Service>(
+    std::declval<const std::string &>(), std::declval<const rclcpp::QoS &>(),
+    std::declval<rclcpp::CallbackGroup::SharedPtr>()))>> : std::true_type
+{
+};
+
+/// Create the underlying client handle.
 template <class SpecT, class NodeT>
 auto create_client_handle(NodeT * node, rclcpp::CallbackGroup::SharedPtr group)
 {
-#if AUTOWARE_COMPONENT_INTERFACE_UTILS_RCLCPP_GE_IRON
-  return node->template create_client<typename SpecT::Service>(
-    SpecT::name, rclcpp::ServicesQoS(), group);
-#else
-  // ROS 2 Humble exposes only the (non-deprecated) rmw_qos_profile_t overload.
-  return node->template create_client<typename SpecT::Service>(
-    SpecT::name, rmw_qos_profile_services_default, group);
-#endif
+  if constexpr (has_qos_create_client<SpecT, NodeT>::value) {
+    return node->template create_client<typename SpecT::Service>(
+      SpecT::name, rclcpp::ServicesQoS(), group);
+  } else {
+    return node->template create_client<typename SpecT::Service>(
+      SpecT::name, rmw_qos_profile_services_default, group);
+  }
 }
+
+#if AUTOWARE_COMPONENT_INTERFACE_UTILS_RCLCPP_GE_IRON
+/// True when the handle supports ROS 2 service introspection. rclcpp's Client and Service do; a
+/// handle without configure_introspection() cannot be traced this way.
+template <class HandleT, class = void>
+struct has_configure_introspection : std::false_type
+{
+};
+template <class HandleT>
+struct has_configure_introspection<
+  HandleT, std::void_t<decltype(std::declval<HandleT &>().configure_introspection(
+             std::declval<rclcpp::Clock::SharedPtr>(), std::declval<const rclcpp::QoS &>(),
+             std::declval<rcl_service_introspection_state_t>()))>> : std::true_type
+{
+};
+#endif
 
 /// The wrapper class of a service client. Service-call tracing is provided by ROS 2
 /// service introspection (enabled via NodeInterface::introspection_state), not a
@@ -71,9 +103,11 @@ public:
   {
     client_ = create_client_handle<SpecT>(interface_->node, group);
 #if AUTOWARE_COMPONENT_INTERFACE_UTILS_RCLCPP_GE_IRON
-    if (interface_->introspection_state != RCL_SERVICE_INTROSPECTION_OFF) {
-      client_->configure_introspection(
-        interface_->node->get_clock(), rclcpp::QoS(1), interface_->introspection_state);
+    if constexpr (has_configure_introspection<WrapType>::value) {
+      if (interface_->introspection_state != RCL_SERVICE_INTROSPECTION_OFF) {
+        client_->configure_introspection(
+          interface_->node->get_clock(), rclcpp::QoS(1), interface_->introspection_state);
+      }
     }
 #endif
   }

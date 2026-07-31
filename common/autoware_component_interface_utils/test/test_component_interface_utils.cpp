@@ -49,6 +49,20 @@ struct FakeSubscription
   using SharedPtr = std::shared_ptr<FakeSubscription>;
 };
 
+template <class ServiceT>
+struct FakeService
+{
+  using SharedPtr = std::shared_ptr<FakeService>;
+};
+
+template <class ServiceT>
+struct FakeClient
+{
+  using SharedPtr = std::shared_ptr<FakeClient>;
+};
+
+/// Only the rclcpp::QoS overloads of create_service()/create_client() are offered, as a node type
+/// that never had to carry Humble's rmw_qos_profile_t signature would.
 struct FakeNode
 {
   template <class MessageT>
@@ -63,6 +77,20 @@ struct FakeNode
     const std::string &, const rclcpp::QoS &, CallbackT &&)
   {
     return std::make_shared<FakeSubscription<MessageT>>();
+  }
+
+  template <class ServiceT, class CallbackT>
+  typename FakeService<ServiceT>::SharedPtr create_service(
+    const std::string &, CallbackT &&, const rclcpp::QoS &, rclcpp::CallbackGroup::SharedPtr)
+  {
+    return std::make_shared<FakeService<ServiceT>>();
+  }
+
+  template <class ServiceT>
+  typename FakeClient<ServiceT>::SharedPtr create_client(
+    const std::string &, const rclcpp::QoS &, rclcpp::CallbackGroup::SharedPtr)
+  {
+    return std::make_shared<FakeClient<ServiceT>>();
   }
 };
 
@@ -259,13 +287,20 @@ TEST(interface, wrappers_deduce_endpoint_types_from_node)
   static_assert(
     std::is_same_v<typename utils::Service<ChangeOperationMode>::WrapType, rclcpp::Service<Srv>>);
 
-  // Another node type contributes its own endpoint types instead.
+  // Another node type contributes its own endpoint types instead. FakeNode offers only the
+  // rclcpp::QoS overloads of create_service() and create_client(), so this also pins that the
+  // overload is chosen by what the node accepts rather than by the rclcpp version.
   static_assert(
     std::is_same_v<
       typename utils::Publisher<OperationModeState, FakeNode>::WrapType, FakePublisher<Message>>);
   static_assert(std::is_same_v<
                 typename utils::Subscription<OperationModeState, FakeNode>::WrapType,
                 FakeSubscription<Message>>);
+  static_assert(
+    std::is_same_v<
+      typename utils::Service<ChangeOperationMode, FakeNode>::WrapType, FakeService<Srv>>);
+  static_assert(std::is_same_v<
+                typename utils::Client<ChangeOperationMode, FakeNode>::WrapType, FakeClient<Srv>>);
 
   // A derived node must not be deduced as the adaptor's node type, or the wrappers it creates
   // would stop matching the consumers' Publisher<Spec> member declarations.
