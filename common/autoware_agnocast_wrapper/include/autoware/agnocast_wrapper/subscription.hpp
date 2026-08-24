@@ -67,6 +67,12 @@ public:
   /// copied; while any copy is alive it pins one shared-memory entry.
   /// @throw std::runtime_error on the Agnocast path when the subscription has a callback.
   virtual std::shared_ptr<const MessageT> take_data() = 0;
+
+  /// Effective QoS, mirroring rclcpp::SubscriptionBase::get_actual_qos().
+  virtual rclcpp::QoS get_actual_qos() const = 0;
+
+  /// Remap-resolved topic name, mirroring rclcpp::SubscriptionBase::get_topic_name().
+  virtual const char * get_topic_name() const = 0;
 };
 
 template <typename MessageT>
@@ -81,14 +87,21 @@ class AgnocastSubscription : public Subscription<MessageT>
   // reference into the publisher's shared memory.
   typename agnocast::Subscription<MessageT>::SharedPtr callback_subscription_;
   typename agnocast::TakeSubscription<MessageT>::SharedPtr take_subscription_;
-  // As passed to the constructor, for the error message below. Not remap-resolved.
-  std::string topic_name_;
+
+  /// The subscription in whichever mode this object was constructed, for the queries that do not
+  /// care which one it is.
+  const agnocast::SubscriptionBase & handle() const
+  {
+    return callback_subscription_
+             ? static_cast<const agnocast::SubscriptionBase &>(*callback_subscription_)
+             : static_cast<const agnocast::SubscriptionBase &>(*take_subscription_);
+  }
 
   agnocast::TakeSubscription<MessageT> & polling_handle()
   {
     if (!take_subscription_) {
       throw std::runtime_error(
-        "agnocast subscription on '" + topic_name_ +
+        std::string("agnocast subscription on '") + handle().get_topic_name() +
         "' was created with a callback, so it cannot be polled: Agnocast fixes the delivery mode "
         "at construction. Create it without a callback to use take()/take_data().");
     }
@@ -100,7 +113,6 @@ public:
   explicit AgnocastSubscription(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
     const agnocast::SubscriptionOptions & options)
-  : topic_name_(topic_name)
   {
     // TODO(Koichi98): AUTOWARE_MESSAGE_UNIQUE_PTR should be disallowed for Agnocast subscriptions.
     // Agnocast uses shared memory, so mutable exclusive ownership is semantically incorrect and
@@ -160,8 +172,7 @@ public:
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
     const agnocast::SubscriptionOptions & options)
   : take_subscription_(
-      std::make_shared<agnocast::TakeSubscription<MessageT>>(node, topic_name, qos, options)),
-    topic_name_(topic_name)
+      std::make_shared<agnocast::TakeSubscription<MessageT>>(node, topic_name, qos, options))
   {
   }
 
@@ -180,6 +191,10 @@ public:
     // Zero-copy: the returned pointer aliases the shared-memory message.
     return to_std_shared_ptr(polling_handle().take(false));
   }
+
+  rclcpp::QoS get_actual_qos() const override { return handle().get_actual_qos(); }
+
+  const char * get_topic_name() const override { return handle().get_topic_name(); }
 };
 
 template <typename MessageT>
@@ -273,6 +288,10 @@ public:
     }
     return got_any ? data : nullptr;
   }
+
+  rclcpp::QoS get_actual_qos() const override { return subscription_->get_actual_qos(); }
+
+  const char * get_topic_name() const override { return subscription_->get_topic_name(); }
 };
 
 template <typename MessageT, typename Func>
