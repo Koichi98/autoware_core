@@ -265,6 +265,21 @@ public:
     });
   }
 
+  /// rmw_qos_profile_t overload, kept because rclcpp::Node only grew the rclcpp::QoS overloads of
+  /// create_client()/create_service() in Iron (rclcpp 21); callers written against Humble still
+  /// pass rmw_qos_profile_services_default. Converts and delegates, so the version handling stays
+  /// in one place.
+  template <typename ServiceT>
+  AUTOWARE_CLIENT_PTR(ServiceT)
+  create_client(
+    const std::string & service_name, const rmw_qos_profile_t & qos_profile,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    return create_client<ServiceT>(
+      service_name, rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(qos_profile), qos_profile),
+      group);
+  }
+
   // Service with a callback taking AUTOWARE_SERVER_REQUEST_PTR/RESPONSE_PTR (message_ptr).
   template <
     typename ServiceT, typename Func,
@@ -334,6 +349,19 @@ public:
       "Service callback must be invocable with "
       "(AUTOWARE_SERVER_REQUEST_PTR(ServiceT), AUTOWARE_SERVER_RESPONSE_PTR(ServiceT)) or with "
       "(std::shared_ptr<ServiceT::Request>, std::shared_ptr<ServiceT::Response>).");
+  }
+
+  /// rmw_qos_profile_t overload; see the create_client() counterpart above. Forwards to the
+  /// rclcpp::QoS overload set, so callback-shape selection stays in one place.
+  template <typename ServiceT, typename Func>
+  AUTOWARE_SERVICE_PTR(ServiceT)
+  create_service(
+    const std::string & service_name, Func && callback, const rmw_qos_profile_t & qos_profile,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    return create_service<ServiceT>(
+      service_name, std::forward<Func>(callback),
+      rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(qos_profile), qos_profile), group);
   }
 
   // ===== Timer =====
@@ -684,6 +712,21 @@ public:
       node_.get(), service_name, qos, group);
   }
 
+  /// rmw_qos_profile_t overload, kept because rclcpp::Node only grew the rclcpp::QoS overloads of
+  /// create_client()/create_service() in Iron (rclcpp 21); callers written against Humble still
+  /// pass rmw_qos_profile_services_default. Converts and delegates, so the version handling stays
+  /// in one place.
+  template <typename ServiceT>
+  AUTOWARE_CLIENT_PTR(ServiceT)
+  create_client(
+    const std::string & service_name, const rmw_qos_profile_t & qos_profile,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    return create_client<ServiceT>(
+      service_name, rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(qos_profile), qos_profile),
+      group);
+  }
+
   // ===== Service =====
   // Service with a callback taking AUTOWARE_SERVER_REQUEST_PTR/RESPONSE_PTR.
   template <
@@ -746,6 +789,19 @@ public:
       "Service callback must be invocable with "
       "(AUTOWARE_SERVER_REQUEST_PTR(ServiceT), AUTOWARE_SERVER_RESPONSE_PTR(ServiceT)) or with "
       "(std::shared_ptr<ServiceT::Request>, std::shared_ptr<ServiceT::Response>).");
+  }
+
+  /// rmw_qos_profile_t overload; see the create_client() counterpart above. Forwards to the
+  /// rclcpp::QoS overload set, so callback-shape selection stays in one place.
+  template <typename ServiceT, typename Func>
+  AUTOWARE_SERVICE_PTR(ServiceT)
+  create_service(
+    const std::string & service_name, Func && callback, const rmw_qos_profile_t & qos_profile,
+    rclcpp::CallbackGroup::SharedPtr group = nullptr)
+  {
+    return create_service<ServiceT>(
+      service_name, std::forward<Func>(callback),
+      rclcpp::QoS(rclcpp::QoSInitialization::from_rmw(qos_profile), qos_profile), group);
   }
 
   // ===== Timer =====
