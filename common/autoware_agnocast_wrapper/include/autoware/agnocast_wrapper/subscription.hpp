@@ -27,12 +27,26 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 
 namespace autoware::agnocast_wrapper
 {
+
+/// Translate rclcpp subscription options into the Agnocast ones. Only the three fields Agnocast
+/// understands carry over; the rest (event callbacks, intra-process settings, allocators) have no
+/// Agnocast counterpart because Agnocast does not go through rmw.
+inline agnocast::SubscriptionOptions to_agnocast_subscription_options(
+  const rclcpp::SubscriptionOptions & options)
+{
+  agnocast::SubscriptionOptions result;
+  result.callback_group = options.callback_group;
+  result.ignore_local_publications = options.ignore_local_publications;
+  result.qos_overriding_options = options.qos_overriding_options;
+  return result;
+}
 
 template <typename MessageT>
 class Subscription
@@ -41,18 +55,52 @@ public:
   using SharedPtr = std::shared_ptr<Subscription<MessageT>>;
 
   virtual ~Subscription() = default;
+
+  /// Polling retrieval, mirroring rclcpp::Subscription::take(). Copies the message out; prefer
+  /// take_data(), which does not copy on the Agnocast path.
+  /// @return true if a new message was written to @p out.
+  /// @throw std::runtime_error on the Agnocast path when the subscription has a callback.
+  virtual bool take(MessageT & out, rclcpp::MessageInfo & info) = 0;
+
+  /// Latest new message as a shared pointer, or nullptr when nothing new has arrived. On the
+  /// Agnocast path the returned pointer aliases the shared-memory message, so no payload is
+  /// copied; while any copy is alive it pins one shared-memory entry.
+  /// @throw std::runtime_error on the Agnocast path when the subscription has a callback.
+  virtual std::shared_ptr<const MessageT> take_data() = 0;
 };
 
 template <typename MessageT>
 class AgnocastSubscription : public Subscription<MessageT>
 {
-  typename agnocast::Subscription<MessageT>::SharedPtr subscription_;
+  // Exactly one of these holds the subscription. Callback delivery and polling are exclusive on
+  // the Agnocast path, and that is a kernel constraint rather than a wrapper choice:
+  // entry_node::referencing_subscribers carries one bit per (subscriber, entry), so a callback and
+  // a take() on the same subscriber would each build an ipc_shared_ptr on that single bit, and
+  // whichever was destroyed first would release the entry under the other. rclcpp::Subscription
+  // can mix the two only because its take() copies into caller storage; Agnocast hands out a
+  // reference into the publisher's shared memory.
+  typename agnocast::Subscription<MessageT>::SharedPtr callback_subscription_;
+  typename agnocast::TakeSubscription<MessageT>::SharedPtr take_subscription_;
+  // As passed to the constructor, for the error message below. Not remap-resolved.
+  std::string topic_name_;
+
+  agnocast::TakeSubscription<MessageT> & polling_handle()
+  {
+    if (!take_subscription_) {
+      throw std::runtime_error(
+        "agnocast subscription on '" + topic_name_ +
+        "' was created with a callback, so it cannot be polled: Agnocast fixes the delivery mode "
+        "at construction. Create it without a callback to use take()/take_data().");
+    }
+    return *take_subscription_;
+  }
 
 public:
   template <typename NodeT, typename Func>
   explicit AgnocastSubscription(
     NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
     const agnocast::SubscriptionOptions & options)
+  : topic_name_(topic_name)
   {
     // TODO(Koichi98): AUTOWARE_MESSAGE_UNIQUE_PTR should be disallowed for Agnocast subscriptions.
     // Agnocast uses shared memory, so mutable exclusive ownership is semantically incorrect and
@@ -82,7 +130,7 @@ public:
         ? OwnershipType::Unique
         : OwnershipType::Shared;
 
-    subscription_ = agnocast::create_subscription<MessageT>(
+    callback_subscription_ = agnocast::create_subscription<MessageT>(
       node, topic_name, qos,
       [callback = std::forward<Func>(callback)](agnocast::ipc_shared_ptr<MessageT> && msg) {
         if constexpr (is_std_shared_ptr_callback) {
@@ -104,6 +152,33 @@ public:
         }
       },
       options);
+  }
+
+  /// Callback-less construction, for polling via take()/take_data().
+  template <typename NodeT>
+  explicit AgnocastSubscription(
+    NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos,
+    const agnocast::SubscriptionOptions & options)
+  : take_subscription_(
+      std::make_shared<agnocast::TakeSubscription<MessageT>>(node, topic_name, qos, options)),
+    topic_name_(topic_name)
+  {
+  }
+
+  bool take(MessageT & out, rclcpp::MessageInfo & /*info*/) override
+  {
+    agnocast::ipc_shared_ptr<const MessageT> data = polling_handle().take(false);
+    if (!data) {
+      return false;
+    }
+    out = *data;
+    return true;
+  }
+
+  std::shared_ptr<const MessageT> take_data() override
+  {
+    // Zero-copy: the returned pointer aliases the shared-memory message.
+    return to_std_shared_ptr(polling_handle().take(false));
   }
 };
 
@@ -161,6 +236,42 @@ public:
         }
       },
       ros2_options);
+  }
+
+  /// Callback-less construction, for polling via take()/take_data(). Mirrors the rclcpp idiom:
+  /// a no-op callback in a callback group that is never added to an executor.
+  explicit ROS2Subscription(
+    rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos,
+    const agnocast::SubscriptionOptions & options)
+  {
+    rclcpp::SubscriptionOptions ros2_options;
+    ros2_options.callback_group =
+      options.callback_group
+        ? options.callback_group
+        : node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+    subscription_ = node->create_subscription<MessageT>(
+      topic_name, qos, [](std::unique_ptr<MessageT>) {}, ros2_options);
+  }
+
+  bool take(MessageT & out, rclcpp::MessageInfo & info) override
+  {
+    return subscription_->take(out, info);
+  }
+
+  std::shared_ptr<const MessageT> take_data() override
+  {
+    // Drain the queue and keep the newest, so the semantics match the Agnocast path's
+    // take(allow_same_message=false): the latest new message, or nullptr if nothing arrived.
+    auto data = std::make_shared<MessageT>();
+    rclcpp::MessageInfo info;
+    bool got_any = false;
+    for (size_t i = 0; i < subscription_->get_actual_qos().depth(); ++i) {
+      if (!subscription_->take(*data, info)) {
+        break;
+      }
+      got_any = true;
+    }
+    return got_any ? data : nullptr;
   }
 };
 
