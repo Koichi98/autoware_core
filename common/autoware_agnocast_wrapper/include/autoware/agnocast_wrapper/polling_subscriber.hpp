@@ -20,6 +20,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -34,7 +35,7 @@ namespace autoware::agnocast_wrapper::polling
 namespace polling_policy = autoware_utils_rclcpp::polling_policy;
 
 template <typename MessageT, template <typename> class PollingPolicy>
-inline constexpr bool polling_default_allow_same_message_v =
+inline constexpr bool polling_keeps_last_data_v =
   !std::is_same_v<PollingPolicy<MessageT>, polling_policy::Newest<MessageT>>;
 
 template <typename MessageT, template <typename> class PollingPolicy>
@@ -60,11 +61,11 @@ public:
 
   std::shared_ptr<const MessageT> take_data()
   {
-    return take_data_impl(polling_default_allow_same_message_v<MessageT, PollingPolicy>);
+    return take_data_impl(polling_keeps_last_data_v<MessageT, PollingPolicy>);
   }
 
 protected:
-  virtual std::shared_ptr<const MessageT> take_data_impl(bool allow_same_message) = 0;
+  virtual std::shared_ptr<const MessageT> take_data_impl(bool keeps_last_data) = 0;
 };
 
 template <typename MessageT, template <typename> class PollingPolicy = polling_policy::Latest>
@@ -82,11 +83,11 @@ public:
   {
   }
 
-  // allow_same_message is unused: upstream autoware_utils_rclcpp has no take_data(bool);
+  // keeps_last_data is unused: upstream autoware_utils_rclcpp has no take_data(bool);
   // re-delivery is already governed by the PollingPolicy tag (Latest re-delivers, Newest only new).
-  std::shared_ptr<const MessageT> take_data_impl(bool allow_same_message) override
+  std::shared_ptr<const MessageT> take_data_impl(bool keeps_last_data) override
   {
-    (void)allow_same_message;
+    (void)keeps_last_data;
     return subscriber_->take_data();
   }
 };
@@ -98,6 +99,9 @@ class AgnocastPollingSubscriber : public PollingSubscriber<MessageT, PollingPoli
 {
   typename agnocast::TakeSubscription<MessageT>::SharedPtr subscriber_;
 
+  std::shared_ptr<const MessageT> last_data_;
+  std::mutex last_data_mtx_;
+
 public:
   explicit AgnocastPollingSubscriber(
     agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos)
@@ -105,17 +109,35 @@ public:
   {
   }
 
-  std::shared_ptr<const MessageT> take_data_impl(bool allow_same_message) override
+  std::shared_ptr<const MessageT> take_data_impl(bool keeps_last_data) override
   {
-    agnocast::ipc_shared_ptr<const MessageT> data = subscriber_->take(allow_same_message);
-    if (!data) {
-      return nullptr;
+    agnocast::ipc_shared_ptr<const MessageT> data = subscriber_->take(false);
+
+    std::shared_ptr<const MessageT> new_data;
+    if (data) {
+      // Zero-copy: alias the shared-memory message into the returned std::shared_ptr. `holder`
+      // keeps the ipc_shared_ptr alive for the returned pointer's lifetime, so lifetime/refcount
+      // match the rclcpp heap path. While any copy is alive it pins one agnocast shared-memory
+      // entry.
+      auto holder = std::make_shared<agnocast::ipc_shared_ptr<const MessageT>>(std::move(data));
+      new_data = std::shared_ptr<const MessageT>(holder, holder->get());
     }
-    // Zero-copy: alias the shared-memory message into the returned std::shared_ptr. `holder` keeps
-    // the ipc_shared_ptr alive for the returned pointer's lifetime, so lifetime/refcount match the
-    // rclcpp heap path. While any copy is alive it pins one agnocast shared-memory entry.
-    auto holder = std::make_shared<agnocast::ipc_shared_ptr<const MessageT>>(std::move(data));
-    return std::shared_ptr<const MessageT>(holder, holder->get());
+
+    if (!keeps_last_data) {
+      return new_data;
+    }
+
+    // Declared outside the lock so that dropping the previous message, which may release the
+    // kernel-side reference, happens after the mutex is released.
+    std::shared_ptr<const MessageT> old_data;
+    {
+      std::lock_guard<std::mutex> lock(last_data_mtx_);
+      if (new_data) {
+        old_data = std::move(last_data_);
+        last_data_ = std::move(new_data);
+      }
+      return last_data_;
+    }
   }
 };
 
