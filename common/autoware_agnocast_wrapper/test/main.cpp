@@ -16,36 +16,19 @@
 
 #include <gtest/gtest.h>
 
-#ifdef USE_AGNOCAST_ENABLED
-#include <agnocast/agnocast.hpp>
-#endif
-
 namespace
 {
 
-/// @brief Brings up the same contexts a wrapper node's main() brings up.
-class WrapperEnvironment : public testing::Environment
+/// @brief Initializes the context the way a mixed-mode executable does: exactly one of the rclcpp
+/// and the agnocast context is brought up, and only an AgnocastOnly executable brings up the
+/// agnocast one. See templates/node_main_switchable.cpp.in.
+class ContextEnvironment : public testing::Environment
 {
 public:
-  WrapperEnvironment(int argc, char ** argv) : argc_(argc), argv_(argv) {}
+  ContextEnvironment(int argc, char ** argv) : argc_(argc), argv_(argv) {}
 
-  void SetUp() override
-  {
-    rclcpp::init(argc_, argv_);
-#ifdef USE_AGNOCAST_ENABLED
-    // Only sets up the agnocast context: it opens no device and issues no ioctl, so it is safe
-    // even where the kernel module and the heaphook are absent.
-    agnocast::init(argc_, argv_);
-#endif
-  }
-
-  void TearDown() override
-  {
-#ifdef USE_AGNOCAST_ENABLED
-    agnocast::shutdown();
-#endif
-    rclcpp::shutdown();
-  }
+  void SetUp() override { rclcpp::init(argc_, argv_); }
+  void TearDown() override { rclcpp::shutdown(); }
 
 private:
   int argc_;
@@ -57,6 +40,6 @@ private:
 int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);
-  testing::AddGlobalTestEnvironment(new WrapperEnvironment(argc, argv));
+  testing::AddGlobalTestEnvironment(new ContextEnvironment(argc, argv));
   return RUN_ALL_TESTS();
 }
