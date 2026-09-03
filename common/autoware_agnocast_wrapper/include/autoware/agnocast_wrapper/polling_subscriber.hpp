@@ -25,6 +25,8 @@
 #include <utility>
 
 #ifdef USE_AGNOCAST_ENABLED
+#include "autoware/agnocast_wrapper/message_ptr.hpp"
+
 #include <agnocast/agnocast.hpp>
 #endif
 
@@ -86,20 +88,6 @@ public:
 
 #ifdef USE_AGNOCAST_ENABLED
 
-/// @brief Zero-copy: alias a shared-memory message into a std::shared_ptr. `holder` keeps the
-/// ipc_shared_ptr alive for the returned pointer's lifetime, so lifetime and refcount match the
-/// rclcpp heap path. While any copy is alive it pins one agnocast shared-memory entry. An empty
-/// input yields a null pointer.
-template <typename MessageT>
-std::shared_ptr<const MessageT> to_std_shared_ptr(agnocast::ipc_shared_ptr<const MessageT> && ptr)
-{
-  if (!ptr) {
-    return nullptr;
-  }
-  auto holder = std::make_shared<agnocast::ipc_shared_ptr<const MessageT>>(std::move(ptr));
-  return std::shared_ptr<const MessageT>(holder, holder->get());
-}
-
 /// @brief Reproduces an autoware_utils_rclcpp polling policy on top of the agnocast backend.
 ///
 /// agnocast::TakeSubscription::take() has no notion of a policy: it returns the entry this
@@ -121,7 +109,7 @@ class AgnocastPollingPolicy<MessageT, polling_policy::Latest>
 public:
   std::shared_ptr<const MessageT> take_data(agnocast::TakeSubscription<MessageT> & subscriber)
   {
-    if (auto new_data = to_std_shared_ptr(subscriber.take(false))) {
+    if (auto new_data = detail::to_std_shared_ptr(subscriber.take(false))) {
       data_ = std::move(new_data);
     }
     return data_;
@@ -136,7 +124,7 @@ class AgnocastPollingPolicy<MessageT, polling_policy::Newest>
 public:
   std::shared_ptr<const MessageT> take_data(agnocast::TakeSubscription<MessageT> & subscriber)
   {
-    return to_std_shared_ptr(subscriber.take(false));
+    return detail::to_std_shared_ptr(subscriber.take(false));
   }
 };
 
