@@ -47,15 +47,6 @@ using std_msgs::msg::String;
 constexpr auto discovery_timeout = std::chrono::seconds(10);
 constexpr auto poll_interval = std::chrono::milliseconds(10);
 
-bool agnocast_backend_selected()
-{
-#ifdef USE_AGNOCAST_ENABLED
-  return autoware::agnocast_wrapper::use_agnocast();
-#else
-  return false;
-#endif
-}
-
 /// agnocast exits the process from inside the subscription constructor when LD_PRELOAD lacks the
 /// heaphook (validate_ld_preload() in agnocast_utils.cpp), which would take the whole test binary
 /// down instead of failing one case. Probe the same condition so the test can skip instead.
@@ -71,7 +62,7 @@ class PollingSubscriberTest : public testing::Test
 protected:
   void SetUp() override
   {
-    if (agnocast_backend_selected() && !agnocast_heaphook_loaded()) {
+    if (autoware::agnocast_wrapper::use_agnocast() && !agnocast_heaphook_loaded()) {
       GTEST_SKIP() << "ENABLE_AGNOCAST=1 without the agnocast heaphook: the agnocast backend "
                       "cannot be exercised in this environment.";
     }
@@ -109,7 +100,7 @@ protected:
 
 TEST_F(PollingSubscriberTest, CheckQosDepthGreaterThanOneThrows)
 {
-  if (agnocast_backend_selected()) {
+  if (autoware::agnocast_wrapper::use_agnocast()) {
     // TODO(Koichi98): the agnocast backend accepts a deep QoS instead of rejecting it. The check
     // is in agnocast upstream but not in a released version yet; enable this once it is released.
     GTEST_SKIP() << "The agnocast backend does not reject QoS depth > 1 yet.";

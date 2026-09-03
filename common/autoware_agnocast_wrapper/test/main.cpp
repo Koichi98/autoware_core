@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "autoware/agnocast_wrapper/runtime.hpp"
+
 #include <rclcpp/rclcpp.hpp>
 
 #include <gtest/gtest.h>
@@ -19,16 +21,14 @@
 namespace
 {
 
-/// @brief Initializes the context the way a mixed-mode executable does: exactly one of the rclcpp
-/// and the agnocast context is brought up, and only an AgnocastOnly executable brings up the
-/// agnocast one. See templates/node_main_switchable.cpp.in.
+/// @brief This binary spins no Agnocast executor, so agnocast_only stays at its default.
 class ContextEnvironment : public testing::Environment
 {
 public:
   ContextEnvironment(int argc, char ** argv) : argc_(argc), argv_(argv) {}
 
-  void SetUp() override { rclcpp::init(argc_, argv_); }
-  void TearDown() override { rclcpp::shutdown(); }
+  void SetUp() override { autoware::agnocast_wrapper::init(argc_, argv_); }
+  void TearDown() override { autoware::agnocast_wrapper::shutdown(); }
 
 private:
   int argc_;
