@@ -706,7 +706,14 @@ public:
   }
 
   // ===== Subscription =====
-  template <typename MessageT, typename Func>
+  // A 3rd positional argument that is a SubscriptionOptions selects the callback-less overload
+  // below, so it must not be deduced as a callback here.
+  template <typename Func>
+  static constexpr bool is_subscription_callback_v =
+    !std::is_same_v<std::decay_t<Func>, rclcpp::SubscriptionOptions>;
+
+  template <
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
   typename rclcpp::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
     const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
@@ -716,8 +723,7 @@ public:
   }
 
   template <
-    typename MessageT, typename Func,
-    std::enable_if_t<!std::is_same_v<std::decay_t<Func>, rclcpp::SubscriptionOptions>, int> = 0>
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
   typename rclcpp::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, size_t qos_history_depth, Func && callback,
     const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
