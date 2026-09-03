@@ -116,7 +116,6 @@ if(BUILD_TESTING)
   find_package(std_msgs REQUIRED)
   file(GLOB_RECURSE test_files test/main.cpp test/cases/*.cpp)
   ament_auto_add_gtest(test_${PROJECT_NAME} ${test_files})
-  # USE_AGNOCAST_ENABLED rides along on the library's PUBLIC compile definition.
   target_link_libraries(test_${PROJECT_NAME} ${PROJECT_NAME})
   ament_target_dependencies(test_${PROJECT_NAME} std_msgs)
 endif()
