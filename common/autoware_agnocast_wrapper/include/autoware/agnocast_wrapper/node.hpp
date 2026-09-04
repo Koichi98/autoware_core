@@ -41,6 +41,21 @@ using OnSetParametersCallbackType =
 using OnSetParametersCallbackType =
   rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType;
 #endif
+
+/// @brief Reject a QoS that a polling reader cannot serve.
+/// @throws std::invalid_argument if the history depth is not 1. A deeper queue makes take_data()
+/// lag behind the newest message, which is why autoware_utils_rclcpp's policies reject it; depth 0
+/// (KeepAll, or KeepLast(0)) is rejected here as well because the agnocast backend then never
+/// delivers while the ROS 2 backend does.
+inline void check_polling_qos(const rclcpp::QoS & qos, const std::string & topic_name)
+{
+  const auto depth = qos.get_rmw_qos_profile().depth;
+  if (depth != 1) {
+    throw std::invalid_argument(
+      "polling reader on '" + topic_name + "': history depth " + std::to_string(depth) +
+      " is not supported, take_data() needs a single-depth queue");
+  }
+}
 }  // namespace autoware::agnocast_wrapper
 
 #ifdef USE_AGNOCAST_ENABLED
@@ -279,6 +294,8 @@ public:
     const std::string & topic_name, const rclcpp::QoS & qos,
     const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
   {
+    check_polling_qos(qos, topic_name);
+
     return visit_node([&](auto & n) -> typename Subscription<MessageT>::SharedPtr {
       using NodeT = std::decay_t<decltype(*n)>;
       if constexpr (std::is_same_v<NodeT, agnocast::Node>) {
@@ -741,6 +758,8 @@ public:
     const std::string & topic_name, const rclcpp::QoS & qos,
     const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
   {
+    check_polling_qos(qos, topic_name);
+
     rclcpp::SubscriptionOptions polling_options = options;
     if (!polling_options.callback_group) {
       polling_options.callback_group =

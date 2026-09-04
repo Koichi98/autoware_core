@@ -287,18 +287,11 @@ public:
 
   std::shared_ptr<const MessageT> take_data() override
   {
-    // Drain the queue and keep the newest, so the semantics match the Agnocast path's
-    // take(allow_same_message=false): the latest new message, or nullptr if nothing arrived.
+    // A single take() is the whole queue: check_polling_qos() pins the depth at 1, so this
+    // matches the Agnocast path's take(allow_same_message=false).
     auto data = std::make_shared<MessageT>();
     rclcpp::MessageInfo info;
-    bool got_any = false;
-    for (size_t i = 0; i < subscription_->get_actual_qos().depth(); ++i) {
-      if (!subscription_->take(*data, info)) {
-        break;
-      }
-      got_any = true;
-    }
-    return got_any ? data : nullptr;
+    return subscription_->take(*data, info) ? data : nullptr;
   }
 
   rclcpp::QoS get_actual_qos() const override { return subscription_->get_actual_qos(); }
