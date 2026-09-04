@@ -41,6 +41,21 @@ using OnSetParametersCallbackType =
 using OnSetParametersCallbackType =
   rclcpp::node_interfaces::NodeParametersInterface::OnParametersSetCallbackType;
 #endif
+
+/// @brief Reject a QoS that a polling reader cannot serve.
+/// @throws std::invalid_argument if the history depth is not 1. A deeper queue makes take_data()
+/// lag behind the newest message, which is why autoware_utils_rclcpp's policies reject it; depth 0
+/// (KeepAll, or KeepLast(0)) is rejected here as well because the agnocast backend then never
+/// delivers while the ROS 2 backend does.
+inline void check_polling_qos(const rclcpp::QoS & qos, const std::string & topic_name)
+{
+  const auto depth = qos.get_rmw_qos_profile().depth;
+  if (depth != 1) {
+    throw std::invalid_argument(
+      "polling reader on '" + topic_name + "': history depth " + std::to_string(depth) +
+      " is not supported, take_data() needs a single-depth queue");
+  }
+}
 }  // namespace autoware::agnocast_wrapper
 
 #ifdef USE_AGNOCAST_ENABLED
@@ -221,7 +236,15 @@ public:
   }
 
   // ===== Subscription =====
-  template <typename MessageT, typename Func>
+  // A 4th positional argument that is a SubscriptionOptions selects the callback-less overloads
+  // below, so it must not be deduced as a callback here.
+  template <typename Func>
+  static constexpr bool is_subscription_callback_v =
+    !std::is_same_v<std::decay_t<Func>, agnocast::SubscriptionOptions> &&
+    !std::is_same_v<std::decay_t<Func>, rclcpp::SubscriptionOptions>;
+
+  template <
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
   typename Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
     const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
@@ -238,7 +261,8 @@ public:
     });
   }
 
-  template <typename MessageT, typename Func>
+  template <
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
   typename Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, size_t qos_history_depth, Func && callback,
     const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
@@ -246,6 +270,51 @@ public:
     return create_subscription<MessageT>(
       topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), std::forward<Func>(callback),
       options);
+  }
+
+  /// rclcpp::SubscriptionOptions overload, so call sites written against rclcpp::Node compile
+  /// unchanged. The three fields Agnocast understands map one to one.
+  template <
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
+  typename Subscription<MessageT>::SharedPtr create_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
+    const rclcpp::SubscriptionOptions & options)
+  {
+    return create_subscription<MessageT>(
+      topic_name, qos, std::forward<Func>(callback), to_agnocast_subscription_options(options));
+  }
+
+  /// Create a subscription without a callback, for polling via take()/take_data().
+  ///
+  /// On the Agnocast path this registers no eventfd, so publishers skip it when signalling. On
+  /// the rclcpp path it is the familiar idiom of a no-op callback in a callback group that is
+  /// never added to an executor -- the wrapper builds that here so callers do not have to.
+  template <typename MessageT>
+  typename Subscription<MessageT>::SharedPtr create_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+  {
+    check_polling_qos(qos, topic_name);
+
+    return visit_node([&](auto & n) -> typename Subscription<MessageT>::SharedPtr {
+      using NodeT = std::decay_t<decltype(*n)>;
+      if constexpr (std::is_same_v<NodeT, agnocast::Node>) {
+        return std::make_shared<AgnocastSubscription<MessageT>>(n.get(), topic_name, qos, options);
+      } else {
+        return std::make_shared<ROS2Subscription<MessageT>>(n.get(), topic_name, qos, options);
+      }
+    });
+  }
+
+  /// @copydoc create_subscription(const std::string&, const rclcpp::QoS&,
+  ///          const agnocast::SubscriptionOptions&)
+  template <typename MessageT>
+  typename Subscription<MessageT>::SharedPtr create_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    const rclcpp::SubscriptionOptions & options)
+  {
+    return create_subscription<MessageT>(
+      topic_name, qos, to_agnocast_subscription_options(options));
   }
 
   // ===== Client / Service =====
@@ -654,7 +723,14 @@ public:
   }
 
   // ===== Subscription =====
-  template <typename MessageT, typename Func>
+  // A 3rd positional argument that is a SubscriptionOptions selects the callback-less overload
+  // below, so it must not be deduced as a callback here.
+  template <typename Func>
+  static constexpr bool is_subscription_callback_v =
+    !std::is_same_v<std::decay_t<Func>, rclcpp::SubscriptionOptions>;
+
+  template <
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
   typename rclcpp::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, const rclcpp::QoS & qos, Func && callback,
     const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
@@ -663,7 +739,8 @@ public:
       topic_name, qos, std::forward<Func>(callback), options);
   }
 
-  template <typename MessageT, typename Func>
+  template <
+    typename MessageT, typename Func, std::enable_if_t<is_subscription_callback_v<Func>, int> = 0>
   typename rclcpp::Subscription<MessageT>::SharedPtr create_subscription(
     const std::string & topic_name, size_t qos_history_depth, Func && callback,
     const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
@@ -671,6 +748,25 @@ public:
     return node_->create_subscription<MessageT>(
       topic_name, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)), std::forward<Func>(callback),
       options);
+  }
+
+  /// Create a subscription without a callback, for polling via take(). Builds the familiar
+  /// rclcpp idiom -- a no-op callback in a callback group that is never added to an executor --
+  /// so the call site matches the Agnocast build, where no callback is registered at all.
+  template <typename MessageT>
+  typename rclcpp::Subscription<MessageT>::SharedPtr create_subscription(
+    const std::string & topic_name, const rclcpp::QoS & qos,
+    const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
+  {
+    check_polling_qos(qos, topic_name);
+
+    rclcpp::SubscriptionOptions polling_options = options;
+    if (!polling_options.callback_group) {
+      polling_options.callback_group =
+        node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
+    }
+    return node_->create_subscription<MessageT>(
+      topic_name, qos, [](std::unique_ptr<MessageT>) {}, polling_options);
   }
 
   // ===== Client =====

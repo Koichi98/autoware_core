@@ -113,7 +113,7 @@ public:
   uint32_t get_subscription_count() const override { return publisher_->get_subscription_count(); }
   uint32_t get_intra_process_subscription_count() const override
   {
-    return publisher_->get_intra_subscription_count();
+    return publisher_->get_intra_process_subscription_count();
   }
   const rmw_gid_t & get_gid() const override { return publisher_->get_gid(); }
   const char * get_topic_name() const override { return publisher_->get_topic_name(); }
