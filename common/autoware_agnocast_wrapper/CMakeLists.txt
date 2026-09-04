@@ -114,11 +114,10 @@ if(BUILD_TESTING)
   )
 
   find_package(std_msgs REQUIRED)
-  find_package(rcl_interfaces REQUIRED)
   file(GLOB_RECURSE test_files test/main.cpp test/cases/*.cpp)
   ament_auto_add_gtest(test_${PROJECT_NAME} ${test_files})
   target_link_libraries(test_${PROJECT_NAME} ${PROJECT_NAME})
-  ament_target_dependencies(test_${PROJECT_NAME} std_msgs rcl_interfaces)
+  ament_target_dependencies(test_${PROJECT_NAME} std_msgs)
 endif()
 
 autoware_ament_auto_package()
