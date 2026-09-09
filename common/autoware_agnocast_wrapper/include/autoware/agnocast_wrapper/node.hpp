@@ -342,6 +342,29 @@ public:
       std::move(callback));
   }
 
+  GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos,
+    GenericSubscriptionArrivalCallback callback,
+    const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+  {
+    if (use_agnocast()) {
+      return std::make_shared<AgnocastGenericSubscription>(
+        get_agnocast_node().get(), topic_name, topic_type, qos, std::move(callback), options);
+    } else {
+      return std::make_shared<ROS2GenericSubscription>(
+        get_rclcpp_node().get(), topic_name, topic_type, qos, std::move(callback), options);
+    }
+  }
+
+  GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, size_t qos_history_depth,
+    GenericSubscriptionArrivalCallback callback)
+  {
+    return create_generic_subscription(
+      topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
+      std::move(callback));
+  }
+
   // ===== Client / Service =====
   template <typename ServiceT>
   AUTOWARE_CLIENT_PTR(ServiceT)
@@ -855,6 +878,26 @@ public:
     GenericSubscriptionCallback callback)
   {
     return node_->create_generic_subscription(
+      topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
+      std::move(callback));
+  }
+
+  rclcpp::GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, const rclcpp::QoS & qos,
+    GenericSubscriptionArrivalCallback callback,
+    const rclcpp::SubscriptionOptions & options = rclcpp::SubscriptionOptions{})
+  {
+    return node_->create_generic_subscription(
+      topic_name, topic_type, qos,
+      [callback = std::move(callback)](std::shared_ptr<rclcpp::SerializedMessage>) { callback(); },
+      options);
+  }
+
+  rclcpp::GenericSubscription::SharedPtr create_generic_subscription(
+    const std::string & topic_name, const std::string & topic_type, size_t qos_history_depth,
+    GenericSubscriptionArrivalCallback callback)
+  {
+    return create_generic_subscription(
       topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
       std::move(callback));
   }
