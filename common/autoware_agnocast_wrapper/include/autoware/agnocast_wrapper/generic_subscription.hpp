@@ -31,6 +31,14 @@ namespace autoware::agnocast_wrapper
 /// non-Agnocast Node::create_generic_subscription() (see node.hpp) needs it too.
 using GenericSubscriptionCallback = std::function<void(std::shared_ptr<rclcpp::SerializedMessage>)>;
 
+/// Callback shape for a caller that only needs to know a message arrived, not what it held — a
+/// topic liveness monitor, say. On the Agnocast path this skips both the typesupport dlopen and
+/// the per-message CDR encode that producing a rclcpp::SerializedMessage costs, neither of which
+/// buys such a caller anything. It saves nothing on the ROS 2 path, where rmw hands the
+/// subscription a serialized message either way; the overload exists there so the same call site
+/// compiles in both builds.
+using GenericSubscriptionArrivalCallback = std::function<void()>;
+
 }  // namespace autoware::agnocast_wrapper
 
 #ifdef USE_AGNOCAST_ENABLED
@@ -74,7 +82,9 @@ public:
 
 class AgnocastGenericSubscription : public GenericSubscription
 {
-  agnocast::GenericSubscription::SharedPtr subscription_;
+  // agnocast::GenericSubscription is the serializing subclass; the arrival form below needs the
+  // plain type-erased subscription underneath it.
+  std::shared_ptr<agnocast::Subscription<void>> subscription_;
 
 public:
   template <typename NodeT>
@@ -85,6 +95,24 @@ public:
   : subscription_(
       agnocast::create_generic_subscription(
         node, topic_name, topic_type, qos, std::move(callback), options))
+  {
+  }
+
+  template <typename NodeT>
+  explicit AgnocastGenericSubscription(
+    NodeT * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, GenericSubscriptionArrivalCallback callback,
+    const agnocast::SubscriptionOptions & options)
+  : subscription_(
+      std::make_shared<agnocast::Subscription<void>>(
+        node, topic_name, topic_type, qos,
+        [callback = std::move(callback)](agnocast::ipc_shared_ptr<void> && message) {
+          // Release the shared-memory entry before running the callback, as
+          // agnocast::GenericSubscription does once it is done reading the message.
+          message.reset();
+          callback();
+        },
+        options, agnocast::SubscriptionRole::Default))
   {
   }
 
@@ -104,6 +132,17 @@ public:
   {
     subscription_ = node->create_generic_subscription(
       topic_name, topic_type, qos, std::move(callback), to_rclcpp_subscription_options(options));
+  }
+
+  explicit ROS2GenericSubscription(
+    rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+    const rclcpp::QoS & qos, GenericSubscriptionArrivalCallback callback,
+    const agnocast::SubscriptionOptions & options)
+  {
+    subscription_ = node->create_generic_subscription(
+      topic_name, topic_type, qos,
+      [callback = std::move(callback)](std::shared_ptr<rclcpp::SerializedMessage>) { callback(); },
+      to_rclcpp_subscription_options(options));
   }
 
   const char * get_topic_name() const override { return subscription_->get_topic_name(); }
@@ -129,6 +168,30 @@ inline GenericSubscription::SharedPtr create_generic_subscription(
 inline GenericSubscription::SharedPtr create_generic_subscription(
   rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
   const size_t qos_history_depth, GenericSubscriptionCallback callback,
+  const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+{
+  return create_generic_subscription(
+    node, topic_name, topic_type, rclcpp::QoS(rclcpp::KeepLast(qos_history_depth)),
+    std::move(callback), options);
+}
+
+inline GenericSubscription::SharedPtr create_generic_subscription(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const rclcpp::QoS & qos, GenericSubscriptionArrivalCallback callback,
+  const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
+{
+  if (use_agnocast()) {
+    return std::make_shared<AgnocastGenericSubscription>(
+      node, topic_name, topic_type, qos, std::move(callback), options);
+  } else {
+    return std::make_shared<ROS2GenericSubscription>(
+      node, topic_name, topic_type, qos, std::move(callback), options);
+  }
+}
+
+inline GenericSubscription::SharedPtr create_generic_subscription(
+  rclcpp::Node * node, const std::string & topic_name, const std::string & topic_type,
+  const size_t qos_history_depth, GenericSubscriptionArrivalCallback callback,
   const agnocast::SubscriptionOptions & options = agnocast::SubscriptionOptions{})
 {
   return create_generic_subscription(
