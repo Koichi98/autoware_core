@@ -31,6 +31,10 @@ if(BUILD_TESTING)
   # map_height_fitter_kernel.hpp is an internal (non-installed) header under src/.
   target_include_directories(test_${PROJECT_NAME}_kernel PRIVATE src)
 
+  # Agnocast deliberately aborts the process when a Publisher or a Subscription is created
+  # without libagnocast_heaphook.so in LD_PRELOAD (validate_ld_preload() in agnocast_utils.cpp).
+  # We do not want the tests to depend on the heaphook or on the kernel module, so the tests
+  # that create publishers/subscriptions are the ones skipped at ENABLE_AGNOCAST=1.
   if(NOT (DEFINED ENV{ENABLE_AGNOCAST} AND "$ENV{ENABLE_AGNOCAST}" STREQUAL "1"))
     ament_add_ros_isolated_gtest(test_${PROJECT_NAME}_fit
       test/test_map_height_fitter_fit.cpp

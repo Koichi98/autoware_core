@@ -37,6 +37,10 @@ if(BUILD_TESTING)
   add_testcase(test/test_copy_vector_to_array.cpp)
   add_testcase(test/test_localization_util.cpp)
 
+  # Agnocast deliberately aborts the process when a Publisher or a Subscription is created
+  # without libagnocast_heaphook.so in LD_PRELOAD (validate_ld_preload() in agnocast_utils.cpp).
+  # We do not want the tests to depend on the heaphook or on the kernel module, so the tests
+  # that create publishers/subscriptions are the ones skipped at ENABLE_AGNOCAST=1.
   if(NOT (DEFINED ENV{ENABLE_AGNOCAST} AND "$ENV{ENABLE_AGNOCAST}" STREQUAL "1"))
     ament_add_gtest(test_pose_initializer_node_integration test/test_pose_initializer_node_integration.cpp)
     target_include_directories(test_pose_initializer_node_integration PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
