@@ -182,6 +182,19 @@ public:
 
   // ===== Parameters (template) =====
   template <typename ParameterT>
+  bool get_parameter_or(
+    const std::string & name, ParameterT & value, const ParameterT & alternative_value) const
+  {
+    rclcpp::Parameter parameter;
+    if (get_parameter(name, parameter)) {
+      value = parameter.get_value<ParameterT>();
+      return true;
+    }
+    value = alternative_value;
+    return false;
+  }
+
+  template <typename ParameterT>
   auto declare_parameter(
     const std::string & name, const ParameterT & default_value,
     const rcl_interfaces::msg::ParameterDescriptor & descriptor =
@@ -710,6 +723,19 @@ public:
   }
 
   // ===== Parameters (template) =====
+  template <typename ParameterT>
+  bool get_parameter_or(
+    const std::string & name, ParameterT & value, const ParameterT & alternative_value) const
+  {
+    rclcpp::Parameter parameter;
+    if (get_parameter(name, parameter)) {
+      value = parameter.get_value<ParameterT>();
+      return true;
+    }
+    value = alternative_value;
+    return false;
+  }
+
   template <typename ParameterT>
   auto declare_parameter(
     const std::string & name, const ParameterT & default_value,
