@@ -138,6 +138,7 @@ public:
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr get_node_base_interface() const;
   rclcpp::node_interfaces::NodeTopicsInterface::SharedPtr get_node_topics_interface() const;
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr get_node_parameters_interface() const;
+  rclcpp::node_interfaces::NodeGraphInterface::SharedPtr get_node_graph_interface() const;
 
   // ===== Callback groups =====
   rclcpp::CallbackGroup::SharedPtr create_callback_group(
@@ -634,6 +635,10 @@ public:
   rclcpp::node_interfaces::NodeParametersInterface::SharedPtr get_node_parameters_interface() const
   {
     return node_->get_node_parameters_interface();
+  }
+  rclcpp::node_interfaces::NodeGraphInterface::SharedPtr get_node_graph_interface() const
+  {
+    return node_->get_node_graph_interface();
   }
 
   // ===== Callback groups =====

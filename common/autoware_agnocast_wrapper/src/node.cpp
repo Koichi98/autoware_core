@@ -90,6 +90,11 @@ rclcpp::node_interfaces::NodeParametersInterface::SharedPtr Node::get_node_param
   return visit_node([](const auto & n) { return n->get_node_parameters_interface(); });
 }
 
+rclcpp::node_interfaces::NodeGraphInterface::SharedPtr Node::get_node_graph_interface() const
+{
+  return visit_node([](const auto & n) { return n->get_node_graph_interface(); });
+}
+
 rclcpp::CallbackGroup::SharedPtr Node::create_callback_group(
   rclcpp::CallbackGroupType group_type, bool automatically_add_to_executor_with_node)
 {
