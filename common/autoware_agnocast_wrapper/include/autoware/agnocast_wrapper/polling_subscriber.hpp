@@ -218,8 +218,9 @@ class AgnocastPollingSubscriber : public PollingSubscriber<MessageT, PollingPoli
   AgnocastPollingPolicy<MessageT, PollingPolicy> policy_;
 
 public:
+  template <typename NodeT>
   explicit AgnocastPollingSubscriber(
-    agnocast::Node * node, const std::string & topic_name, const rclcpp::QoS & qos)
+    NodeT * node, const std::string & topic_name, const rclcpp::QoS & qos)
   : subscriber_(std::make_shared<agnocast::TakeSubscription<MessageT>>(node, topic_name, qos))
   {
   }
@@ -250,6 +251,23 @@ typename PollingSubscriber<MessageT, PollingPolicy>::SharedPtr create_polling_su
     node->get_rclcpp_node().get(), topic_name, qos);
 }
 
+/// @brief Polling subscriber for a plain rclcpp::Node, which takes from Agnocast under
+/// ENABLE_AGNOCAST=1 so that only this endpoint moves to Agnocast.
+/// @note The returned subscriber references @p node by raw pointer, so it must not outlive it.
+template <typename MessageT, template <typename> class PollingPolicy = polling_policy::Latest>
+typename PollingSubscriber<MessageT, PollingPolicy>::SharedPtr create_polling_subscriber(
+  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1})
+{
+  detail::check_polling_qos(
+    qos, topic_name, !std::is_same_v<PollingPolicy<MessageT>, polling_policy::All<MessageT>>);
+
+  if (use_agnocast()) {
+    return std::make_shared<AgnocastPollingSubscriber<MessageT, PollingPolicy>>(
+      node, topic_name, qos);
+  }
+  return std::make_shared<ROS2PollingSubscriber<MessageT, PollingPolicy>>(node, topic_name, qos);
+}
+
 #else  // USE_AGNOCAST_ENABLED
 
 /// @note The returned subscriber references the node's rclcpp node by raw pointer, so it must not
@@ -264,6 +282,17 @@ typename PollingSubscriber<MessageT, PollingPolicy>::SharedPtr create_polling_su
 
   return std::make_shared<ROS2PollingSubscriber<MessageT, PollingPolicy>>(
     node->get_rclcpp_node().get(), topic_name, qos);
+}
+
+/// @note The returned subscriber references @p node by raw pointer, so it must not outlive it.
+template <typename MessageT, template <typename> class PollingPolicy = polling_policy::Latest>
+typename PollingSubscriber<MessageT, PollingPolicy>::SharedPtr create_polling_subscriber(
+  rclcpp::Node * node, const std::string & topic_name, const rclcpp::QoS & qos = rclcpp::QoS{1})
+{
+  detail::check_polling_qos(
+    qos, topic_name, !std::is_same_v<PollingPolicy<MessageT>, polling_policy::All<MessageT>>);
+
+  return std::make_shared<ROS2PollingSubscriber<MessageT, PollingPolicy>>(node, topic_name, qos);
 }
 
 #endif  // USE_AGNOCAST_ENABLED
